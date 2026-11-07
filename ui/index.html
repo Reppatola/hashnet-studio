@@ -266,12 +266,16 @@ $('bClr').onclick=()=>{hist=[];SV('chat',[]);drawChat()};
 
 // ── Логи, прогресс
 let logSel=null,logFrom=0,trFrom=0,mgFrom=0,trLines=[],pts=[],tdata={},dFrom={};
-function drawChart(){const c=$('chart'),x=c.getContext('2d');x.clearRect(0,0,c.width,c.height);if(pts.length<2)return;
- const cs=getComputedStyle(document.body);const xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1]);const x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys);
- const X=v=>30+(v-x0)/(x1-x0||1)*(c.width-40),Y=v=>c.height-18-(v-y0)/(y1-y0||1)*(c.height-30);
- x.strokeStyle=cs.getPropertyValue('--ac');x.lineWidth=2;x.beginPath();pts.forEach((p,i)=>i?x.lineTo(X(p[0]),Y(p[1])):x.moveTo(X(p[0]),Y(p[1])));x.stroke();
- x.fillStyle=cs.getPropertyValue('--mut');x.font='12px sans-serif';x.fillText(y1.toFixed(2)+' бит/байт',34,12);x.fillText(y0.toFixed(2),2,c.height-4);x.fillText('шаг '+x1,c.width-70,c.height-4);
- const vs=(tdata.val||[]);x.fillStyle=cs.getPropertyValue('--ok');vs.forEach(v=>{if(v[0]>=x0&&v[1]>=y0*0.5){x.beginPath();x.arc(X(v[0]),Y(Math.min(Math.max(v[1],y0),y1)),4,0,7);x.fill()}})}
+function drawChart(){const c=$('chart'),x=c.getContext('2d');x.clearRect(0,0,c.width,c.height);if(pts.length<4)return;
+ const cs=getComputedStyle(document.body);const skip=Math.min(Math.floor(pts.length*0.04),pts.length-3);const base=pts.slice(skip);
+ const W=Math.max(3,Math.floor(base.length/60));const sm=base.map((p,i)=>{let s=0,n=0;for(let k=Math.max(0,i-W);k<=i;k++){s+=base[k][1];n++}return[p[0],s/n]});
+ const vs=(tdata.val||[]).filter(v=>v[0]>=base[0][0]);const all=sm.map(p=>p[1]).concat(vs.map(v=>v[1]));
+ const x0=base[0][0],x1=base[base.length-1][0];let y0=Math.min(...all),y1=Math.max(...all);const pad=(y1-y0)*0.08||0.05;y0-=pad;y1+=pad;
+ const X=v=>40+(v-x0)/(x1-x0||1)*(c.width-50),Y=v=>c.height-18-(v-y0)/(y1-y0||1)*(c.height-34);
+ x.strokeStyle=cs.getPropertyValue('--mut');x.globalAlpha=.25;x.lineWidth=1;x.beginPath();base.forEach((p,i)=>i?x.lineTo(X(p[0]),Y(p[1])):x.moveTo(X(p[0]),Y(p[1])));x.stroke();x.globalAlpha=1;
+ x.strokeStyle=cs.getPropertyValue('--ac');x.lineWidth=2;x.beginPath();sm.forEach((p,i)=>i?x.lineTo(X(p[0]),Y(p[1])):x.moveTo(X(p[0]),Y(p[1])));x.stroke();
+ x.fillStyle=cs.getPropertyValue('--ok');vs.forEach(v=>{x.beginPath();x.arc(X(v[0]),Y(v[1]),3.5,0,7);x.fill()});
+ x.fillStyle=cs.getPropertyValue('--mut');x.font='12px sans-serif';x.fillText(y1.toFixed(2),2,12);x.fillText(y0.toFixed(2),2,c.height-4);x.fillText('шаг '+x1+'  · синяя — train (сглажено), зелёные точки — val, бит/байт',50,c.height-4)}
 function parseTrain(lines){for(const l of lines){let m=l.match(/\[\s*(\d+)\s*\/\s*(\d+)\]/);if(m){tdata.step=+m[1];tdata.total=+m[2];const b=l.match(/\(([\d.]+)\s*бит/);if(b)pts.push([+m[1],+b[1]]);const t=l.match(/(\d+)\s*ток\/с/);if(t)tdata.tps=+t[1];const e=l.match(/ETA\s*([^|]+)$/);if(e)tdata.eta=e[1].trim();const lr=l.match(/lr\s*([\d.e+-]+)/);if(lr)tdata.lr=lr[1];const lo=l.match(/loss\s*([\d.]+)/);if(lo)tdata.loss=lo[1];if(b)tdata.bpb=b[1]}
   const v=l.match(/val\D{0,20}([\d.]+)\s*бит/i)||(/val/i.test(l)&&l.match(/val\D{0,20}([\d.]+)/i));if(v&&tdata.step){tdata.vbpb=v[1];(tdata.val=tdata.val||[]).push([tdata.step,+v[1]])}}
  if(pts.length>1500)pts=pts.filter((_,i)=>i%2===0)}
