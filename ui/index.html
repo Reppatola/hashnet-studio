@@ -139,13 +139,13 @@ canvas{width:100%;height:160px;background:var(--bg);border:1px solid var(--bd);b
  <div class="card"><h2>Чат с моделью</h2>
   <div class="hint warn" id="chatWarn"></div>
   <label>Модель</label><div id="chatCk"></div>
-  <div class="row"><div><label>Длина, байт</label><input id="c_len" type="number" value="300"></div><div><label>Temperature</label><input id="c_t" value="0.8"></div><div><label>Top-k</label><input id="c_k" type="number" value="40"></div><div><label>No-repeat N (0 — выкл.)</label><input id="c_nr" type="number" value="4"></div></div>
+  <div class="row"><div><label>Длина, байт</label><input id="c_len" type="number" value="300"></div><div><label>Temperature</label><input id="c_t" value="0.8"></div><div><label>Top-k</label><input id="c_k" type="number" value="40"></div><div><label>No-repeat N (0 — выкл.; малые N ломают код)</label><input id="c_nr" type="number" value="0"></div></div>
   <div id="chat"></div>
   <div class="row" style="margin-top:8px"><textarea id="c_in" rows="2" placeholder="Начало текста или кода… (модель продолжает, а не отвечает)"></textarea><button class="b nf" id="bGen">Отправить</button></div>
   <div class="row" style="margin-top:6px"><button class="b s nf" id="bClr">Очистить чат</button></div></div>
  <div class="card"><h2>Метрика кода: доля синтаксически корректного Rust</h2>
-  <p class="hint">Модель продолжает N начал функций/структур; считается, сколько результатов закрылись скобками и разобрались парсером Rust (нужен rustfmt). Бит/байт этого не показывает. Для сравнения моделей запускайте с одинаковыми N и длиной.</p>
-  <div class="row"><div><label>Фрагментов (N)</label><input id="sy_n" type="number" value="40"></div><div><label>Длина, байт</label><input id="sy_len" type="number" value="400"></div><button class="b nf" id="bSyn" style="margin-top:20px">Проверить выбранную модель</button></div>
+  <p class="hint">Модель продолжает N начал функций/структур; считается, сколько результатов закрылись скобками и разобрались парсером Rust (нужен rustfmt). Бит/байт этого не показывает. Для сравнения моделей запускайте с одинаковыми N и длиной. При N=40 разброс ±14 п.п. (95% ИС), поэтому для сравнений берите N≥200 (≈10 минут).</p>
+  <div class="row"><div><label>Фрагментов (N)</label><input id="sy_n" type="number" value="200"></div><div><label>Длина, байт</label><input id="sy_len" type="number" value="400"></div><button class="b nf" id="bSyn" style="margin-top:20px">Проверить выбранную модель</button></div>
   <pre class="log" id="synlog" style="height:200px"></pre></div>
 </section>
 

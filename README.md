@@ -84,7 +84,7 @@ cd rust && cargo build --release
     --data ../workspace/data/rust_2gb.txt --steps 20000 --batch 8
 # Ctrl+C сохраняет чекпойнт; продолжить с того же места:
 ./target/release/hashnet_proto train --resume --ckpt-dir ../workspace/checkpoints/m38 --steps 20000
-./target/release/hashnet_proto gen --ckpt ../workspace/checkpoints/m38 --prompt "fn main() {" --len 300 --no-repeat 4
+./target/release/hashnet_proto gen --ckpt ../workspace/checkpoints/m38 --prompt "fn main() {" --len 300
 ```
 
 Полный набор команд «с нуля до финала» — в **[docs/GUIDE.md](docs/GUIDE.md)**.
@@ -95,7 +95,7 @@ cd rust && cargo build --release
 * **Фазы и повтор** — дообучение на новых данных (`--new-phase`) с долей старых (`--replay-frac`) и контролем забывания: val на старых данных до и после фазы.
 * **Взвешенные данные** — `--data файл@вес`; окна выбираются случайно по всему файлу, валидация — хвост каждого сегмента.
 * **Слияние и рост** — `avg`, `slerp`, `task`, `ties`, `dare`, `stack`, а также `grow` (рост одной модели в глубину с сохранением функции); работает на CPU/в ОЗУ. `tools/compare_runs.py` сравнивает val разных запусков по логам.
-* **Генерация** — температура, top-k, `--no-repeat N` против зацикливания.
+* **Генерация** — температура, top-k, `--no-repeat N` против зацикливания (для кода только большие N≥12: малые запрещают повторять имена и ломают код).
 * **Безопасная оболочка** — слушает только `127.0.0.1`, запросы только с одноразовым ключом, запускаются лишь заранее известные команды; под каждой кнопкой показан эквивалент для терминала.
 
 ## Структура

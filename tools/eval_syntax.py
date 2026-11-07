@@ -76,9 +76,15 @@ def extract(out):
     e = next((i for i, l in enumerate(lines) if i > s and re.match(r"^\[\d+\s*байт", l)), len(lines))
     return "\n".join(lines[s + 1:e])
 
-def generate(a, prompt):
+def wilson(k, n, z=1.96):
+    if n == 0: return 0.0, 0.0
+    p = k / n; d = 1 + z * z / n
+    c = (p + z * z / (2 * n)) / d; h = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / d
+    return max(0.0, c - h), min(1.0, c + h)
+
+def generate(a, prompt, i=0):
     cmd = [a.bin, "gen", "--ckpt", a.ckpt, "--len", str(a.len), "--temp", str(a.temp), "--top-k", str(a.top_k),
-           "--prompt", prompt]
+           "--seed", str(a.seed + i), "--prompt", prompt]
     if a.no_repeat: cmd += ["--no-repeat", str(a.no_repeat)]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if r.returncode != 0: raise RuntimeError(r.stderr[-400:] or r.stdout[-400:])
@@ -113,7 +119,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ckpt"); ap.add_argument("--n", type=int, default=40); ap.add_argument("--len", type=int, default=400)
     ap.add_argument("--temp", type=float, default=0.5); ap.add_argument("--top-k", type=int, default=20)
-    ap.add_argument("--no-repeat", type=int, default=4)
+    ap.add_argument("--no-repeat", type=int, default=0, help="0 = выкл. Малые N (3-6) ЛОМАЮТ код: запрещают повторять любые 4 байта, а в коде имена повторяются постоянно")
+    ap.add_argument("--seed", type=int, default=1000, help="у каждого образца свой seed (иначе повтор промпта даёт тот же текст)")
     ap.add_argument("--bin", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "rust", "target", "release", "hashnet_proto"))
     ap.add_argument("--prompts"); ap.add_argument("--show", type=int, default=3, help="сколько неудачных примеров показать")
     ap.add_argument("--self-test", action="store_true"); ap.add_argument("--reference")
@@ -133,14 +140,16 @@ def main():
     prompts = (prompts * (a.n // len(prompts) + 1))[: a.n]
     texts = []
     for i, p in enumerate(prompts):
-        try: texts.append(generate(a, p))
+        try: texts.append(generate(a, p, i))
         except Exception as e: sys.exit(f"генерация не удалась: {e}")
         print(f"\rгенерация {i + 1}/{len(prompts)}", end="", file=sys.stderr, flush=True)
     print(file=sys.stderr)
     c, o, rows = evaluate(texts)
     n = len(texts)
-    print(f"закрыто (скобки сошлись за {a.len} байт): {c}/{n} = {100 * c / n:.0f}%")
-    print(f"РАЗБИРАЕТСЯ как Rust:                      {o}/{n} = {100 * o / n:.0f}%")
+    lc, hc = wilson(c, n); lo, ho = wilson(o, n)
+    print(f"закрыто (скобки сошлись за {a.len} байт): {c}/{n} = {100 * c / n:.0f}%  (95% ИС {100 * lc:.0f}–{100 * hc:.0f}%)")
+    print(f"РАЗБИРАЕТСЯ как Rust:                      {o}/{n} = {100 * o / n:.0f}%  (95% ИС {100 * lo:.0f}–{100 * ho:.0f}%)")
+    print(f"из закрытых разбирается: {o}/{c}" + (f" = {100 * o / c:.0f}%" if c else ""))
     bad = [r for r in rows if not (r[0] and r[1])][: a.show]
     for _, _, t in bad:
         print("\n── пример неудачи ──\n" + t[:300])
