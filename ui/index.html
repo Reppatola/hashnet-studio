@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HashNet Studio</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mut:#6a737d;--bd:#d8dce1;--ac:#2563eb;--acx:#fff;--ok:#16a34a;--er:#dc2626;--wr:#d97706;--code:#0f172a;--codetx:#e2e8f0}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1318;--card:#171c23;--tx:#e6e9ee;--mut:#8b95a1;--bd:#2a313a;--ac:#4c8dff;--acx:#06101f;--code:#0a0d11;--codetx:#d5dbe3}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.45 system-ui,sans-serif}
+header{display:flex;gap:6px;align-items:center;padding:8px 16px;background:var(--card);border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:5;flex-wrap:wrap}
+header b{margin-right:10px;font-size:16px}
+nav button{background:none;border:0;color:var(--mut);padding:8px 12px;border-radius:8px;cursor:pointer;font:inherit}
+nav button.on{background:var(--ac);color:var(--acx)}
+#gpu{margin-left:auto;color:var(--mut);font-size:12px}
+main{max-width:1100px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+h2{margin:0 0 10px;font-size:16px}h3{margin:14px 0 6px;font-size:14px}
+label{display:block;font-size:12px;color:var(--mut);margin:8px 0 3px}
+input,select,textarea{width:100%;padding:7px 9px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font:inherit}
+input[type=checkbox]{width:auto}.chk{display:flex;gap:6px;align-items:center;margin:8px 0;color:var(--tx);font-size:13px}
+.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1;min-width:120px}.row>.nf{flex:none}
+button.b{background:var(--ac);color:var(--acx);border:0;padding:8px 14px;border-radius:8px;cursor:pointer;font:inherit;font-weight:600}
+button.b.s{background:var(--bg);color:var(--tx);border:1px solid var(--bd);font-weight:400}button.b.d{background:var(--er);color:#fff}
+button.b:disabled{opacity:.45;cursor:default}
+.tag{display:inline-block;padding:1px 8px;border-radius:99px;font-size:11px;border:1px solid var(--bd);color:var(--mut)}
+.tag.running{color:var(--ac);border-color:var(--ac)}.tag.done{color:var(--ok);border-color:var(--ok)}.tag.failed{color:var(--er);border-color:var(--er)}.tag.stopped{color:var(--wr);border-color:var(--wr)}
+pre.log{background:var(--code);color:var(--codetx);padding:10px;border-radius:8px;height:360px;overflow:auto;font:12px/1.4 ui-monospace,monospace;white-space:pre-wrap;word-break:break-all;margin:6px 0}
+pre.cmd{background:var(--code);color:var(--codetx);padding:8px;border-radius:8px;font:12px ui-monospace,monospace;white-space:pre-wrap;word-break:break-all;margin:6px 0}
+table{width:100%;border-collapse:collapse}td,th{padding:6px 8px;border-bottom:1px solid var(--bd);text-align:left;font-size:13px;vertical-align:middle}
+th{color:var(--mut);font-weight:500;font-size:12px}tr.sel{background:color-mix(in srgb,var(--ac) 12%,transparent)}tr.clk{cursor:pointer}
+.mut{color:var(--mut)}.hint{color:var(--mut);font-size:12px;margin:4px 0}.err{color:var(--er)}.warn{color:var(--wr)}
+.bar{height:10px;background:var(--bg);border:1px solid var(--bd);border-radius:6px;overflow:hidden}.bar>i{display:block;height:100%;background:var(--ac)}
+.stats{display:flex;gap:18px;flex-wrap:wrap;margin:8px 0}.stats div{min-width:90px}.stats b{display:block;font-size:18px}.stats span{font-size:11px;color:var(--mut)}
+canvas{width:100%;height:160px;background:var(--bg);border:1px solid var(--bd);border-radius:8px}
+.tabp{display:none}.tabp.on{display:block}
+#chat{height:420px;overflow:auto;border:1px solid var(--bd);border-radius:8px;padding:10px;background:var(--bg)}
+.m{max-width:85%;margin:6px 0;padding:8px 11px;border-radius:12px;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,monospace;font-size:13px}
+.m.u{background:var(--ac);color:var(--acx);margin-left:auto}.m.a{background:var(--card);border:1px solid var(--bd)}
+#modal{position:fixed;inset:0;background:#0008;display:none;align-items:center;justify-content:center;z-index:20}
+#modal>div{background:var(--card);border-radius:12px;width:min(720px,94vw);max-height:84vh;display:flex;flex-direction:column;padding:14px}
+#fl{overflow:auto;flex:1;border:1px solid var(--bd);border-radius:8px;margin:8px 0}#fl div{padding:5px 10px;cursor:pointer;display:flex;justify-content:space-between;gap:8px}#fl div:hover{background:var(--bg)}
+#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--code);color:var(--codetx);padding:9px 16px;border-radius:10px;display:none;z-index:30;max-width:90vw}
+</style></head><body>
+<header><b>HashNet Studio</b>
+<nav id="nav"></nav><span id="gpu"></span></header>
+<main>
+<section class="tabp" id="t-dash">
+ <div class="card"><h2>Состояние</h2><div id="sys"></div><div id="warns"></div>
+  <div style="margin-top:8px"><button class="b" id="bBuild">Собрать программу (cargo build)</button></div></div>
+ <div class="card"><h2>Модели (чекпойнты)</h2><div id="ckl"></div></div>
+ <div class="card"><h2>Недавние задачи</h2><div id="jl"></div></div>
+ <div class="card"><h2>С чего начать</h2><ol><li><b>Данные</b> → нарежьте большой файл на классы (rust / проза / чат…), при необходимости возьмите выборку N ГБ и соедините нужные файлы в один.</li><li><b>Обучение</b> → «Новая модель», выберите размер и файл → «Старт». «Стоп» сохраняет чекпойнт; в любое время «Продолжить» с того же места.</li><li><b>Чат</b> → проверьте, что умеет модель.</li><li><b>Слияние</b> → объедините несколько моделей одинакового размера или нарастите глубину (stack).</li></ol></div>
+</section>
+
+<section class="tabp" id="t-data">
+ <div class="card"><h2>1. Нарезка большого файла по классам</h2>
+  <p class="hint">Делит смешанный файл на rust / проза / чат / диалоги… Сгенерированный код и мусор отбрасываются. «Только отчёт» ничего не пишет — сначала посмотрите, что получится.</p>
+  <label>Исходный файл</label><div class="row"><input id="sp_src"><button class="b s nf" data-pick="file:sp_src">Выбрать…</button></div>
+  <label>Папка для результата</label><div class="row"><input id="sp_out"><button class="b s nf" data-pick="dir:sp_out">Выбрать…</button></div>
+  <div class="row"><div><label>Ограничить первыми N ГБ (0 — весь файл)</label><input id="sp_lim" type="number" value="0" min="0" step="0.5"></div>
+   <div class="chk" style="margin-top:22px"><input type="checkbox" id="sp_dry" checked> Только отчёт (dry-run)</div>
+   <div class="chk" style="margin-top:22px"><input type="checkbox" id="sp_gen"> Сохранять сгенерированный код</div></div>
+  <button class="b" id="bSplit">Запустить нарезку</button></div>
+ <div class="card"><h2>2. Выборка N ГБ из большого файла</h2>
+  <p class="hint">Равномерно по всему файлу кусками (по 1 МБ) — получается уменьшенная копия с тем же составом.</p>
+  <label>Исходный файл</label><div class="row"><input id="sm_src"><button class="b s nf" data-pick="file:sm_src">Выбрать…</button></div>
+  <label>Новый файл</label><div class="row"><input id="sm_dst"><button class="b s nf" data-pick="dir:sm_dst">Папка…</button></div>
+  <div class="row"><div><label>Размер, ГБ</label><input id="sm_gb" type="number" value="2" step="0.5" min="0.01"></div><div><label>Размер куска, МБ</label><input id="sm_ch" type="number" value="1" step="0.5"></div></div>
+  <button class="b" id="bSample">Сделать выборку</button></div>
+ <div class="card"><h2>3. Соединение файлов в один обучающий</h2>
+  <p class="hint">Добавьте файлы и веса. Без «итогового размера» вес = сколько раз взять файл (0.5 — половина, 2 — дважды). С итоговым размером веса — пропорции (7:2:1 → 70/20/10 %). Для нескольких маленьких моделей запускайте соединение несколько раз с разными наборами.</p>
+  <div id="mixl"></div><button class="b s" data-add="mix">+ Добавить файл</button>
+  <label>Итоговый файл</label><div class="row"><input id="mx_out"><button class="b s nf" data-pick="dir:mx_out">Папка…</button></div>
+  <label>Итоговый размер, ГБ (0 — без ограничения)</label><input id="mx_t" type="number" value="0" step="0.5" min="0">
+  <div style="margin-top:10px"><button class="b" id="bMix">Соединить</button></div></div>
+ <div class="card"><h2>4. StarCoderData (parquet) → текст</h2>
+  <label>Папка с parquet</label><div class="row"><input id="sc_src"><button class="b s nf" data-pick="dir:sc_src">Выбрать…</button></div>
+  <label>Папка для текстов</label><div class="row"><input id="sc_out"><button class="b s nf" data-pick="dir:sc_out">Выбрать…</button></div>
+  <div class="row"><div><label>Языки (через запятую, пусто — все)</label><input id="sc_only" placeholder="rust,python"></div><div><label>Макс. ГБ на язык (0 — без лимита)</label><input id="sc_gb" type="number" value="0" step="0.5"></div></div>
+  <button class="b" id="bSc">Конвертировать</button></div>
+ <div class="card"><h2>Ход работы</h2><div id="dlog"></div></div>
+</section>
+
+<section class="tabp" id="t-train">
+ <div class="card"><h2>Обучение</h2>
+  <div class="row"><button class="b" id="mNew">Новая модель</button><button class="b s" id="mRes">Продолжить / дообучить</button></div>
+  <div id="newBox">
+   <label>Размер модели (пресет)</label><select id="preset"></select>
+   <div class="row"><div><label>d_model</label><input id="tr_d" type="number" value="512"></div><div><label>Слоёв</label><input id="tr_L" type="number" value="8"></div><div><label>Голов</label><input id="tr_h" type="number" value="8"></div><div><label>Контекст (seq)</label><input id="tr_seq" type="number" value="256"></div></div>
+   <div class="hint" id="parEst"></div>
+   <label>Папка модели (чекпойнты)</label><div class="row"><input id="tr_dir"><button class="b s nf" data-pick="dir:tr_dir">Выбрать…</button></div>
+  </div>
+  <div id="resBox" style="display:none"><label>Какую модель продолжить</label><div id="resList"></div>
+   <div class="chk"><input type="checkbox" id="tr_np"> Начать новую фазу на других данных (--new-phase)</div>
+   <div class="hint">Если модель прервана — просто «Старт»: обучение пойдёт с того же шага. Данные подхватятся из чекпойнта; новые файлы можно добавить ниже (для новой фазы).</div></div>
+  <h3>Данные</h3><div id="trdata"></div><button class="b s" data-add="tr">+ Добавить файл</button>
+  <h3>Параметры</h3>
+  <div class="row"><div><label>Шагов (steps)</label><input id="tr_steps" type="number" value="20000"></div><div><label>Batch</label><input id="tr_batch" type="number" value="8"></div><div><label>Accum</label><input id="tr_accum" type="number" value="1"></div><div><label>LR</label><input id="tr_lr" value="3e-3"></div></div>
+  <div class="row"><div><label>Warmup</label><input id="tr_wu" type="number" value="200"></div><div><label>Replay-frac (повтор старого)</label><input id="tr_rp" value=""></div><div><label>Чекпойнт каждые N шагов</label><input id="tr_ce" type="number" value="500"></div><div><label>Val каждые N шагов</label><input id="tr_ev" type="number" value="500"></div></div>
+  <div class="hint">Токенов за шаг = batch × seq × accum. При нехватке видеопамяти уменьшайте batch и увеличивайте accum.</div>
+  <div style="margin-top:10px" class="row"><button class="b" id="bTrain">▶ Старт</button><button class="b d" id="bStop" disabled>■ Стоп (с сохранением)</button></div>
+  <pre class="cmd" id="trcmd" style="display:none"></pre></div>
+ <div class="card"><h2>Ход обучения</h2><div class="bar"><i id="pbar" style="width:0"></i></div>
+  <div class="stats" id="tstats"></div><canvas id="chart" width="1000" height="160"></canvas>
+  <pre class="log" id="trlog"></pre></div>
+</section>
+
+<section class="tabp" id="t-merge">
+ <div class="card"><h2>Слияние моделей</h2>
+  <label>Метод</label><select id="mg_m"><option value="avg">avg — усреднение (размер тот же)</option><option value="slerp">slerp — сферическое для двух моделей</option><option value="task">task — арифметика задач (нужна база)</option><option value="ties">ties — TIES (нужна база)</option><option value="dare">dare — DARE (нужна база)</option><option value="stack">stack — склейка слоёв (модель становится глубже)</option></select>
+  <div class="hint" id="mg_h"></div>
+  <label>Модели (папки чекпойнтов)</label><div id="mgl"></div><button class="b s" data-add="mg">+ Добавить модель</button>
+  <div id="mg_baseB"><label>База (общий предок — модель до разных дообучений)</label><div class="row"><input id="mg_base"><button class="b s nf" data-pick="dir:mg_base">Выбрать…</button></div></div>
+  <div class="row"><div><label>alpha (веса через запятую)</label><input id="mg_a" placeholder="0.5,0.5"></div><div><label>t (slerp)</label><input id="mg_t" value="0.5"></div><div><label>density (ties/dare)</label><input id="mg_den" value="0.2"></div><div><label>lambda</label><input id="mg_lam" value="1.0"></div><div><label>drop (dare)</label><input id="mg_dr" value="0.3"></div></div>
+  <div class="row"><div><label>take (stack, напр. 0-6,0-6)</label><input id="mg_tk" placeholder="0-6,0-6"></div><div><label>globals (stack)</label><select id="mg_gl"><option value="">first</option><option>last</option><option>avg</option></select></div></div>
+  <label>Куда сохранить (новая пустая папка)</label><div class="row"><input id="mg_out"><button class="b s nf" data-pick="dir:mg_out">Папка…</button></div>
+  <div style="margin-top:10px"><button class="b" id="bMerge">Слить</button></div>
+  <pre class="cmd" id="mgcmd" style="display:none"></pre>
+  <div class="hint">Слияние работает на процессоре и в ОЗУ. Усреднять имеет смысл только модели одной архитектуры с общим происхождением (одна инициализация). После stack модель нужно дообучить («залечить»).</div></div>
+ <div class="card"><h2>Ход слияния</h2><pre class="log" id="mglog"></pre></div>
+</section>
+
+<section class="tabp" id="t-chat">
+ <div class="card"><h2>Чат с моделью</h2>
+  <div class="hint warn" id="chatWarn"></div>
+  <label>Модель</label><div id="chatCk"></div>
+  <div class="row"><div><label>Длина, байт</label><input id="c_len" type="number" value="300"></div><div><label>Temperature</label><input id="c_t" value="0.8"></div><div><label>Top-k</label><input id="c_k" type="number" value="40"></div><div><label>No-repeat N (0 — выкл.)</label><input id="c_nr" type="number" value="4"></div></div>
+  <div id="chat"></div>
+  <div class="row" style="margin-top:8px"><textarea id="c_in" rows="2" placeholder="Начало текста или кода… (модель продолжает, а не отвечает)"></textarea><button class="b nf" id="bGen">Отправить</button></div>
+  <div class="row" style="margin-top:6px"><button class="b s nf" id="bClr">Очистить чат</button></div></div>
+</section>
+
+<section class="tabp" id="t-logs">
+ <div class="card"><h2>Задачи и логи</h2><div id="jl2"></div>
+  <div id="jhead" class="hint"></div><pre class="cmd" id="jcmd" style="display:none"></pre><pre class="log" id="jlog" style="height:480px"></pre>
+  <button class="b d" id="jstop" disabled>Остановить выбранную</button></div>
+</section>
+
+<section class="tabp" id="t-set">
+ <div class="card"><h2>Настройки</h2>
+  <label>Папка проекта Rust (где Cargo.toml)</label><div class="row"><input id="s_proj"><button class="b s nf" data-pick="dir:s_proj">Выбрать…</button></div>
+  <label>Рабочая папка (data / checkpoints / logs)</label><div class="row"><input id="s_ws"><button class="b s nf" data-pick="dir:s_ws">Выбрать…</button></div>
+  <div class="row"><div><label>Команда cargo</label><input id="s_cargo"></div><div><label>Команда python</label><input id="s_py"></div></div>
+  <div style="margin-top:10px"><button class="b" id="bConf">Сохранить</button> <a id="readme" target="_blank" style="margin-left:12px;color:var(--ac)">Открыть README</a></div></div>
+</section>
+</main>
+<div id="modal"><div><b id="mtitle"></b><div class="hint" id="mpath"></div><div class="row" id="mq" style="margin:4px 0"></div><div id="fl"></div>
+<div class="row" style="justify-content:flex-end"><button class="b s nf" id="mcancel">Отмена</button><button class="b nf" id="mok">Выбрать эту папку</button></div></div></div>
+<div id="toast"></div>
+<script>
+const $=id=>document.getElementById(id);
+const qs=new URLSearchParams(location.search);let TOKEN=qs.get('t');
+try{if(TOKEN)sessionStorage.setItem('tok',TOKEN);else TOKEN=sessionStorage.getItem('tok')}catch(e){}
+if(qs.get('t')&&history.replaceState)history.replaceState(null,'',location.pathname);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function api(p,body){const o={headers:{'X-Token':TOKEN||''}};if(body!==undefined){o.method='POST';o.headers['Content-Type']='application/json';o.body=JSON.stringify(body)}
+ const r=await fetch(p,o);let j={};try{j=await r.json()}catch(e){}if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j}
+function toast(m,err){const t=$('toast');t.textContent=m;t.style.display='block';t.style.background=err?'#991b1b':'';clearTimeout(t._h);t._h=setTimeout(()=>t.style.display='none',err?7000:3000)}
+const fmtB=n=>n>=1e9?(n/1e9).toFixed(2)+' ГБ':n>=1e6?(n/1e6).toFixed(1)+' МБ':n>=1e3?(n/1e3).toFixed(0)+' КБ':n+' Б';
+const fmtT=s=>{s=Math.round(s);return s>=3600?Math.floor(s/3600)+' ч '+Math.floor(s%3600/60)+' м':s>=60?Math.floor(s/60)+' м '+s%60+' с':s+' с'};
+const fmtP=p=>p>=1e6?(p/1e6).toFixed(1)+' M':(p/1e3).toFixed(0)+' K';
+const J=s=>{try{return JSON.parse(localStorage.getItem(s))}catch(e){return null}};const SV=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
+
+// ── вкладки
+const TABS=[['dash','Панель'],['data','Данные'],['train','Обучение'],['merge','Слияние'],['chat','Чат'],['logs','Логи'],['set','Настройки']];
+$('nav').innerHTML=TABS.map(t=>`<button data-t="${t[0]}">${t[1]}</button>`).join('');
+function tab(t){document.querySelectorAll('.tabp').forEach(e=>e.classList.toggle('on',e.id==='t-'+t));document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));try{sessionStorage.setItem('tab',t)}catch(e){}}
+$('nav').onclick=e=>{if(e.target.dataset.t)tab(e.target.dataset.t)};
+let ST=null;
+
+// ── выбор файла
+let pickCb=null,pickMode='file',pickPath='';
+async function fsLoad(p){try{const r=await api('/api/fs?path='+encodeURIComponent(p||''));pickPath=r.path;$('mpath').textContent=r.path;
+ const q=[['Дом',r.home],['Рабочая',r.workspace],['Проект',r.project]].concat((r.mounts||[]).map(m=>[m.split('/').slice(-1)[0],m]));
+ $('mq').innerHTML=q.filter(x=>x[1]).map(x=>`<button class="b s nf" data-go="${esc(x[1])}">${esc(x[0])}</button>`).join('');
+ let h=`<div data-go="${esc(r.parent)}"><span>📁 ..</span></div>`;
+ for(const e of r.entries){if(pickMode==='dir'&&!e.dir&&r.entries.length>300)continue;h+=`<div data-${e.dir?'go':'f'}="${esc(r.path.replace(/\/$/,'')+'/'+e.name)}"><span>${e.dir?'📁':'📄'} ${esc(e.name)}</span><span class="mut">${e.dir?'':fmtB(e.size)}</span></div>`}
+ $('fl').innerHTML=h}catch(e){toast(e.message,1)}}
+function pick(mode,cb,start){pickMode=mode;pickCb=cb;$('mtitle').textContent=mode==='dir'?'Выберите папку':'Выберите файл';$('mok').style.display=mode==='dir'?'':'none';$('modal').style.display='flex';fsLoad(start||(ST&&ST.conf.workspace)||'')}
+$('modal').onclick=e=>{const g=e.target.closest('[data-go]'),f=e.target.closest('[data-f]');if(g)fsLoad(g.dataset.go);else if(f){$('modal').style.display='none';pickCb(f.dataset.f)}};
+$('mcancel').onclick=()=>$('modal').style.display='none';
+$('mok').onclick=()=>{$('modal').style.display='none';pickCb(pickPath)};
+document.addEventListener('click',e=>{const b=e.target.closest('[data-pick]');if(!b)return;const[m,id]=b.dataset.pick.split(':');
+ pick(m,p=>{const el=$(id);if(m==='dir'&&/^(sm_dst|mx_out|mg_out)$/.test(id)){const nm={sm_dst:'sample.txt',mx_out:'mix.txt',mg_out:'merged'}[id];el.value=p+'/'+nm}else el.value=p;el.dispatchEvent(new Event('input'));if(id==='sp_src'&&!$('sp_out').value)$('sp_out').value=p.replace(/\/[^/]*$/,'')+'/split_out'},$(id).value?$(id).value.replace(/\/[^/]*$/,''):'')});
+
+// ── списки файлов
+const LISTS={mix:{el:'mixl',rows:[],w:true},tr:{el:'trdata',rows:[],w:true},mg:{el:'mgl',rows:[],w:false}};
+function drawList(k){const L=LISTS[k];$(L.el).innerHTML=L.rows.length?L.rows.map((r,i)=>`<div class="row" style="margin-bottom:5px;align-items:center"><input value="${esc(r.path)}" data-li="${k}:${i}:path">${L.w?`<input class="nf" style="width:90px;flex:none" value="${esc(r.weight||'')}" placeholder="вес" data-li="${k}:${i}:weight">`:''}<button class="b s nf" data-rm="${k}:${i}">✕</button></div>`).join(''):'<div class="hint">пусто</div>';if(k==='mg')mgCmdHint()}
+document.addEventListener('input',e=>{const d=e.target.dataset.li;if(!d)return;const[k,i,f]=d.split(':');LISTS[k].rows[+i][f]=e.target.value});
+document.addEventListener('click',e=>{const a=e.target.closest('[data-add]');if(a){const k=a.dataset.add;pick('file',p=>{LISTS[k].rows.push({path:p,weight:''});drawList(k)},LISTS[k].rows.length?LISTS[k].rows.slice(-1)[0].path.replace(/\/[^/]*$/,''):(ST&&ST.conf.workspace+'/data'));
+  if(k==='mg'){pickMode='dir';$('mok').style.display='';$('mtitle').textContent='Выберите папку модели (с ckpt_*.bin)'}}
+ const r=e.target.closest('[data-rm]');if(r){const[k,i]=r.dataset.rm.split(':');LISTS[k].rows.splice(+i,1);drawList(k)}});
+
+// ── задачи
+const runs={}; // kind -> job id активный на странице
+async function run(action,params,logId){try{const r=await api('/api/run',{action,params});runs[action]=r.id;toast('Запущено: задача №'+r.id);follow(r.id,logId);return r}catch(e){toast(e.message,1)}}
+const followers={};
+function follow(id,logId){followers[logId]=id;SV('follow:'+logId,id)}
+function jobBadge(j){return `<span class="tag ${j.status}">${{queued:'в очереди',running:'идёт',done:'готово',failed:'ошибка',stopped:'остановлено'}[j.status]||j.status}</span>`}
+
+// ── Панель
+function drawState(){const s=ST;if(!s)return;
+ const g=s.gpu;$('gpu').textContent=g?`${g.name} · ${Math.round(g.used)}/${Math.round(g.total)} МБ · ${g.util}% · ${g.temp}°C`:'GPU: nvidia-smi недоступен';
+ $('sys').innerHTML=`<div class="stats"><div><b>${s.project_ok?(s.binary&&!s.need_build?'готова':s.binary?'нужна пересборка':'не собрана'):'нет проекта'}</b><span>программа hashnet_proto</span></div><div><b>${g?Math.round(g.total-g.used)+' МБ':'—'}</b><span>свободно VRAM</span></div><div><b>${s.disk?fmtB(s.disk.free):'—'}</b><span>свободно на диске</span></div><div><b>${s.jobs.filter(j=>j.status==='running').length}</b><span>задач идёт</span></div></div>`;
+ let w='';if(!s.project_ok)w+=`<div class="err">В папке проекта нет Cargo.toml: ${esc(s.conf.project_dir)} — укажите в «Настройки».</div>`;if(!s.cargo)w+='<div class="err">Команда cargo не найдена (установите Rust: rustup).</div>';$('warns').innerHTML=w;
+ $('ckl').innerHTML=s.ckpts.length?'<table><tr><th>Модель</th><th>Размер</th><th>Шаг</th><th>Состояние</th><th>Токенов</th><th></th></tr>'+s.ckpts.map((c,i)=>{const m=c.meta;return `<tr><td><b>${esc(c.name)}</b><div class="hint">${esc(c.dir)}</div></td><td>${fmtP(m.params)}<div class="hint">d${m.d_model} L${m.layers} h${m.heads} seq${m.seq}</div></td><td>${m.step}</td><td>${m.phase_done?'<span class="tag done">завершена</span>':'<span class="tag stopped">прервана — можно продолжить</span>'}</td><td>${(m.tokens/1e6).toFixed(0)} M</td><td><button class="b s" data-ck="chat:${i}">Чат</button> <button class="b s" data-ck="train:${i}">Продолжить</button></td></tr>`}).join('')+'</table>':'<div class="hint">Пока нет моделей. Обучите первую на вкладке «Обучение».</div>';
+ const jr=j=>`<tr class="clk" data-job="${j.id}"><td>№${j.id}</td><td>${esc(j.title)}</td><td>${jobBadge(j)}</td><td class="mut">${new Date(j.t0*1000).toLocaleString()}</td></tr>`;
+ $('jl').innerHTML=s.jobs.length?'<table>'+s.jobs.slice(0,6).map(jr).join('')+'</table>':'<div class="hint">Задач ещё не было.</div>';
+ $('jl2').innerHTML=s.jobs.length?'<table><tr><th>№</th><th>Задача</th><th>Статус</th><th>Старт</th></tr>'+s.jobs.map(j=>jr(j).replace('<tr class="clk"',`<tr class="clk${j.id===logSel?' sel':''}"`)).join('')+'</table>':'';
+ drawCkSelectors();drawRes();
+ const tj=s.jobs.find(j=>j.kind==='train'&&j.status==='running');$('bTrain').disabled=!!tj;$('bStop').disabled=!tj;$('bStop').dataset.id=tj?tj.id:'';
+ if(tj&&!followers.train)follow(tj.id,'train');
+ $('chatWarn').textContent=tj?'Идёт обучение: генерация займёт видеопамять и замедлит обучение. Лучше подождать или остановить обучение.':'';}
+document.addEventListener('click',e=>{const c=e.target.closest('[data-ck]');if(c){const[a,i]=c.dataset.ck.split(':');const ck=ST.ckpts[+i];if(a==='chat'){chatCk=ck.dir;tab('chat');drawCkSelectors()}else{resSel=ck.dir;setMode('res');tab('train');drawRes()}}
+ const j=e.target.closest('[data-job]');if(j){logSel=+j.dataset.job;logFrom=0;$('jlog').textContent='';tab('logs')}});
+$('bBuild').onclick=()=>run('build',{},'build');
+$('bConf').onclick=async()=>{try{await api('/api/conf',{project_dir:$('s_proj').value,workspace:$('s_ws').value,cargo:$('s_cargo').value,python:$('s_py').value});toast('Сохранено');refresh()}catch(e){toast(e.message,1)}};
+
+// ── Данные
+function fillDefaults(){const w=ST.conf.workspace;if(!$('sp_out').value)$('sp_out').value=w+'/data/split_out';if(!$('sm_dst').value)$('sm_dst').value=w+'/data/sample.txt';if(!$('mx_out').value)$('mx_out').value=w+'/data/mix.txt';if(!$('sc_out').value)$('sc_out').value=w+'/data/code_txt';if(!$('mg_out').value)$('mg_out').value=w+'/checkpoints/merged';if(!$('tr_dir').value)$('tr_dir').value=w+'/checkpoints/model1';$('s_proj').value=ST.conf.project_dir;$('s_ws').value=w;$('s_cargo').value=ST.conf.cargo;$('s_py').value=ST.conf.python;$('readme').href='/readme?t='+encodeURIComponent(TOKEN)}
+$('bSplit').onclick=()=>run('split',{src:$('sp_src').value,out:$('sp_out').value,dry_run:$('sp_dry').checked,keep_generated:$('sp_gen').checked,limit_gb:$('sp_lim').value},'data');
+$('bSample').onclick=()=>run('sample',{src:$('sm_src').value,dst:$('sm_dst').value,gb:$('sm_gb').value,chunk_mb:$('sm_ch').value},'data');
+$('bMix').onclick=()=>run('mix',{files:LISTS.mix.rows,out:$('mx_out').value,target_gb:$('mx_t').value},'data');
+$('bSc').onclick=()=>run('starcoder',{src:$('sc_src').value,out:$('sc_out').value,only:$('sc_only').value,max_gb:$('sc_gb').value},'data');
+
+// ── Обучение
+const PRESETS=[['Микро 6.5M (d256 L8 seq256)',256,8,4,256],['38M (d512 L12 seq256)',512,12,8,256],['50M (d640 L10 seq512)',640,10,10,512],['86M «100M» (d768 L12 seq1024)',768,12,12,1024],['Своя',0,0,0,0]];
+$('preset').innerHTML=PRESETS.map((p,i)=>`<option value="${i}">${p[0]}</option>`).join('');$('preset').value=1;
+function setPreset(){const p=PRESETS[+$('preset').value];if(p[1]){$('tr_d').value=p[1];$('tr_L').value=p[2];$('tr_h').value=p[3];$('tr_seq').value=p[4]}est()}
+function est(){const d=+$('tr_d').value,L=+$('tr_L').value,s=+$('tr_seq').value,h=+$('tr_h').value;const P=12*L*d*d+256*d*2+s*d+2*d+4*d*L;
+ $('parEst').innerHTML=`≈ <b>${fmtP(P)}</b> параметров · обучение ≈ ${(P*16/1e9).toFixed(2)} ГБ + активации · файл модели ≈ ${(P*4/1e6).toFixed(0)} МБ`+(d%h?' <span class="err">d_model должно делиться на головы</span>':'')+(P>0?` · чтобы «насытить» модель нужно порядка ${(P*20/1e9).toFixed(1)} ГБ данных (20 токенов/параметр)`:'')}
+$('preset').onchange=setPreset;['tr_d','tr_L','tr_h','tr_seq'].forEach(i=>$(i).oninput=()=>{$('preset').value=PRESETS.length-1;est()});setPreset();
+let mode='new',resSel=null;
+function setMode(m){mode=m;$('newBox').style.display=m==='new'?'':'none';$('resBox').style.display=m==='res'?'':'none';$('mNew').className='b'+(m==='new'?'':' s');$('mRes').className='b'+(m==='res'?'':' s');$('bTrain').textContent=m==='new'?'▶ Старт':'▶ Продолжить'}
+$('mNew').onclick=()=>setMode('new');$('mRes').onclick=()=>{setMode('res');drawRes()};
+function drawRes(){if(!ST)return;const c=ST.ckpts;if(!resSel&&c.length){resSel=(c.find(x=>!x.meta.phase_done)||c[0]).dir;applyRes()}
+ $('resList').innerHTML=c.length?'<table>'+c.map(x=>`<tr class="clk${x.dir===resSel?' sel':''}" data-rs="${esc(x.dir)}"><td><b>${esc(x.name)}</b></td><td>${fmtP(x.meta.params)}</td><td>шаг ${x.meta.step}${x.meta.phase_steps?' / '+(x.meta.phase_start+x.meta.phase_steps):''}</td><td>${x.meta.phase_done?'<span class="tag done">завершена</span>':'<span class="tag stopped">прервана</span>'}</td></tr>`).join('')+'</table>':'<div class="hint">нет моделей</div>'}
+function applyRes(){const c=ST.ckpts.find(x=>x.dir===resSel);if(c&&!c.meta.phase_done&&c.meta.phase_steps){$('tr_steps').value=c.meta.phase_steps;if(c.meta.phase_lr)$('tr_lr').value=+c.meta.phase_lr.toPrecision(3)}}
+document.addEventListener('click',e=>{const r=e.target.closest('[data-rs]');if(!r)return;resSel=r.dataset.rs;applyRes();drawRes()});
+$('bTrain').onclick=async()=>{const p={steps:$('tr_steps').value,batch:$('tr_batch').value,accum:$('tr_accum').value,lr:$('tr_lr').value,warmup:$('tr_wu').value,replay_frac:$('tr_rp').value,ckpt_every:$('tr_ce').value,eval_every:$('tr_ev').value,data:LISTS.tr.rows.filter(r=>r.path)};
+ if(mode==='new'){Object.assign(p,{ckpt_dir:$('tr_dir').value,d_model:$('tr_d').value,layers:$('tr_L').value,heads:$('tr_h').value,seq:$('tr_seq').value})}
+ else{if(!resSel)return toast('Выберите модель',1);Object.assign(p,{ckpt_dir:resSel,resume:true,new_phase:$('tr_np').checked})}
+ tdata={};const r=await run('train',p,'train');if(r){$('trlog').textContent='';trFrom=0;trLines=[];pts=[];$('trcmd').style.display='';$('trcmd').textContent='Эквивалент в терминале:\n'+r.cmd}};
+$('bStop').onclick=async()=>{const id=$('bStop').dataset.id;if(!id)return;try{await api('/api/stop',{id:+id});toast('Останавливаю — подождите сохранения чекпойнта…')}catch(e){toast(e.message,1)}};
+
+// ── Слияние
+const MH={avg:'Среднее весов. Работает для моделей одной архитектуры с общим предком. Размер не растёт.',slerp:'Сферическая интерполяция двух моделей (параметр t).',task:'База + сумма разностей (модель − база)·alpha. Нужна общая база.',ties:'TIES: оставляет самые крупные изменения и согласует знаки. Нужна общая база.',dare:'DARE: случайно отбрасывает часть изменений (drop) и перенормирует. Нужна общая база.',stack:'Склейка слоёв: из двух 6-слойных получается 12-слойная (take: «0-6,0-6»). Размер растёт; после склейки нужно дообучить.'};
+function mgCmdHint(){const m=$('mg_m').value;$('mg_h').textContent=MH[m];$('mg_baseB').style.display=/task|ties|dare/.test(m)?'':'none'}
+$('mg_m').onchange=mgCmdHint;mgCmdHint();
+$('bMerge').onclick=async()=>{const p={method:$('mg_m').value,models:LISTS.mg.rows.map(r=>r.path),base:$('mg_base').value,out:$('mg_out').value,alpha:$('mg_a').value,t:$('mg_t').value,density:$('mg_den').value,lambda:$('mg_lam').value,drop:$('mg_dr').value,take:$('mg_tk').value,globals:$('mg_gl').value};
+ const r=await run('merge',p,'merge');if(r){$('mgcmd').style.display='';$('mgcmd').textContent='Эквивалент в терминале:\n'+r.cmd;mgFrom=0;$('mglog').textContent=''}};
+
+// ── Чат
+let chatCk=null,hist=J('chat')||[];
+function drawCkSelectors(){if(!ST)return;const c=ST.ckpts;if(!chatCk&&c.length)chatCk=c[0].dir;
+ $('chatCk').innerHTML=c.length?`<select id="chsel">${c.map(x=>`<option value="${esc(x.dir)}" ${x.dir===chatCk?'selected':''}>${esc(x.name)} — ${fmtP(x.meta.params)}, шаг ${x.meta.step}</option>`).join('')}</select>`:'<div class="hint">нет моделей</div>';
+ if($('chsel'))$('chsel').onchange=e=>chatCk=e.target.value;
+ // списки моделей для слияния — быстрый выбор
+ const q=$('mgQuick');}
+function drawChat(){$('chat').innerHTML=hist.map(m=>`<div class="m ${m.r}">${esc(m.t)}</div>`).join('');$('chat').scrollTop=1e9}drawChat();
+function extract(lines){let s=lines.findIndex(l=>/инференс/.test(l));let e=lines.findIndex((l,i)=>i>s&&/\[\d+\s*байт/.test(l));if(s<0)s=-1;return lines.slice(s+1,e<0?undefined:e).join('\n')}
+$('bGen').onclick=async()=>{const pr=$('c_in').value;if(!chatCk)return toast('Выберите модель',1);hist.push({r:'u',t:pr||'(пусто)'});const ph={r:'a',t:'…'};hist.push(ph);drawChat();$('c_in').value='';
+ try{const r=await api('/api/run',{action:'gen',params:{ckpt:chatCk,prompt:pr,len:$('c_len').value,temp:$('c_t').value,top_k:$('c_k').value,no_repeat:$('c_nr').value}});
+  for(let k=0;k<3000;k++){await new Promise(z=>setTimeout(z,700));const j=await api('/api/job?id='+r.id);ph.t=(extract(j.lines)||(j.live||'…'));
+   if(j.status!=='running'&&j.status!=='queued'){if(j.status==='failed')ph.t='ОШИБКА:\n'+j.lines.slice(-8).join('\n');else{ph.t=extract(j.lines)||pr}break}drawChat()}
+ }catch(e){ph.t='ОШИБКА: '+e.message}SV('chat',hist.slice(-60));drawChat()};
+$('bClr').onclick=()=>{hist=[];SV('chat',[]);drawChat()};
+
+// ── Логи, прогресс
+let logSel=null,logFrom=0,trFrom=0,mgFrom=0,trLines=[],pts=[],tdata={},dFrom={};
+function drawChart(){const c=$('chart'),x=c.getContext('2d');x.clearRect(0,0,c.width,c.height);if(pts.length<2)return;
+ const cs=getComputedStyle(document.body);const xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1]);const x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys);
+ const X=v=>30+(v-x0)/(x1-x0||1)*(c.width-40),Y=v=>c.height-18-(v-y0)/(y1-y0||1)*(c.height-30);
+ x.strokeStyle=cs.getPropertyValue('--ac');x.lineWidth=2;x.beginPath();pts.forEach((p,i)=>i?x.lineTo(X(p[0]),Y(p[1])):x.moveTo(X(p[0]),Y(p[1])));x.stroke();
+ x.fillStyle=cs.getPropertyValue('--mut');x.font='12px sans-serif';x.fillText(y1.toFixed(2)+' бит/байт',34,12);x.fillText(y0.toFixed(2),2,c.height-4);x.fillText('шаг '+x1,c.width-70,c.height-4);
+ const vs=(tdata.val||[]);x.fillStyle=cs.getPropertyValue('--ok');vs.forEach(v=>{if(v[0]>=x0&&v[1]>=y0*0.5){x.beginPath();x.arc(X(v[0]),Y(Math.min(Math.max(v[1],y0),y1)),4,0,7);x.fill()}})}
+function parseTrain(lines){for(const l of lines){let m=l.match(/\[\s*(\d+)\s*\/\s*(\d+)\]/);if(m){tdata.step=+m[1];tdata.total=+m[2];const b=l.match(/\(([\d.]+)\s*бит/);if(b)pts.push([+m[1],+b[1]]);const t=l.match(/(\d+)\s*ток\/с/);if(t)tdata.tps=+t[1];const e=l.match(/ETA\s*([^|]+)$/);if(e)tdata.eta=e[1].trim();const lr=l.match(/lr\s*([\d.e+-]+)/);if(lr)tdata.lr=lr[1];const lo=l.match(/loss\s*([\d.]+)/);if(lo)tdata.loss=lo[1];if(b)tdata.bpb=b[1]}
+  const v=l.match(/val\D{0,20}([\d.]+)\s*бит/i)||(/val/i.test(l)&&l.match(/val\D{0,20}([\d.]+)/i));if(v&&tdata.step){tdata.vbpb=v[1];(tdata.val=tdata.val||[]).push([tdata.step,+v[1]])}}
+ if(pts.length>1500)pts=pts.filter((_,i)=>i%2===0)}
+function drawTrain(running){const t=tdata;$('pbar').style.width=(t.total?100*t.step/t.total:0)+'%';
+ $('tstats').innerHTML=[['Шаг',t.step?t.step+' / '+t.total:'—'],['бит/байт',t.bpb||'—'],['val',t.vbpb||'—'],['скорость',t.tps?t.tps+' ток/с':'—'],['осталось',t.eta||'—'],['lr',t.lr||'—']].map(x=>`<div><b>${x[1]}</b><span>${x[0]}</span></div>`).join('');drawChart()}
+let busy=false;
+async function tick(){if(busy)return;busy=true;try{
+ // обучение
+ const tid=followers.train||J('follow:train');
+ if(tid){const j=await api('/api/job?id='+tid+'&from='+trFrom);if(j.lines.length||trFrom===0){parseTrain(j.lines);const el=$('trlog');const atEnd=el.scrollTop+el.clientHeight>el.scrollHeight-30;el.textContent=(trFrom?el.textContent.replace(/\n⟳.*$/,'')+'\n':'')+j.lines.join('\n')+(j.live?'\n⟳ '+j.live:'');if(atEnd)el.scrollTop=1e9;trFrom=j.next;if(j.live){const m=j.live;parseTrain([m])}}else if(j.live){const el=$('trlog');el.textContent=el.textContent.replace(/\n⟳.*$/,'')+'\n⟳ '+j.live}
+  drawTrain(j.status==='running');if(!followers.train)followers.train=tid;if(j.cmd&&$('trcmd').style.display==='none'){$('trcmd').style.display='';$('trcmd').textContent='Эквивалент в терминале:\n'+j.cmd}}
+ const mid=followers.merge||J('follow:merge');if(mid){const j=await api('/api/job?id='+mid+'&from='+mgFrom);if(j.lines.length){$('mglog').textContent+=j.lines.join('\n')+'\n';mgFrom=j.next;$('mglog').scrollTop=1e9}}
+ const did=followers.data||J('follow:data');if(did){const f=dFrom[did]||0;const j=await api('/api/job?id='+did+'&from='+f);dFrom[did]=j.next;let h=$('dlog').dataset.id==did?$('dlog').dataset.txt||'':'';h+=j.lines.join('\n')+(j.lines.length?'\n':'');$('dlog').dataset.id=did;$('dlog').dataset.txt=h;
+  $('dlog').innerHTML=`<div>${jobBadge(j)} ${esc(j.title)} <span class="mut">№${j.id}</span></div><pre class="log" style="height:300px">${esc(h.split('\n').slice(-400).join('\n'))}${j.live?'\n'+esc(j.live):''}</pre>`;
+  const pl=$('dlog').querySelector('pre');pl.scrollTop=1e9}
+ // выбранный лог
+ if(logSel){const j=await api('/api/job?id='+logSel+'&from='+logFrom);const el=$('jlog');if(logFrom===0)el.textContent='';el.textContent=el.textContent.replace(/\n⟳.*$/,'')+(j.lines.length?(el.textContent?'\n':'')+j.lines.join('\n'):'')+(j.live?'\n⟳ '+j.live:'');logFrom=j.next;if(j.lines.length)el.scrollTop=1e9;$('jhead').innerHTML=`№${j.id} ${esc(j.title)} ${jobBadge(j)} · лог: ${esc(j.log_path)}`;$('jcmd').style.display='';$('jcmd').textContent=j.cmd;$('jstop').disabled=j.status!=='running'}
+ }catch(e){}busy=false}
+$('jstop').onclick=async()=>{if(logSel)try{await api('/api/stop',{id:logSel});toast('Остановка…')}catch(e){toast(e.message,1)}};
+async function refresh(){try{ST=await api('/api/state');if(!refresh.f){refresh.f=1;fillDefaults()}drawState()}catch(e){$('gpu').textContent='нет связи с сервером'}}
+Object.keys(LISTS).forEach(drawList);
+// после перезапуска страницы: если учился — подхватить историю лога
+(async()=>{await refresh();let t='dash';try{t=sessionStorage.getItem('tab')||'dash'}catch(e){}tab(t);
+ // восстановить последний train-лог с начала
+ const id=J('follow:train');if(id&&ST.jobs.find(j=>j.id===id)){followers.train=id}
+ setInterval(refresh,2500);setInterval(tick,1000)})();
+</script></body></html>

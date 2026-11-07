@@ -1,0 +1,10 @@
+target/
+__pycache__/
+*.pyc
+studio_config.json
+workspace/data/*
+workspace/checkpoints/*
+workspace/logs/*
+!workspace/*/.keep
+*.bin
+*.log

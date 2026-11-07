@@ -1,0 +1,23 @@
+[package]
+name = "hashnet_proto"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "hashnet_proto"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hashnet_proto"
+path = "src/main.rs"
+
+[[bin]]
+name = "scan"
+path = "src/bin/scan.rs"
+
+[[bin]]
+name = "prep"
+path = "src/bin/prep.rs"
+
+[dependencies]
+cudarc = { version = "0.19", features = ["cuda-version-from-build-system"] }
