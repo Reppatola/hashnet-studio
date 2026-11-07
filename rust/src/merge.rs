@@ -25,6 +25,10 @@ pub struct Opts {
     pub globals: String,
     pub out: String,
     pub seed: u64,
+    pub add_layers: usize,
+    pub place: String,
+    pub init: String,
+    pub eps: f32,
 }
 
 struct Rng64(u64);
@@ -233,6 +237,74 @@ fn stack(o: &Opts, ms: &[&Model]) -> Res<Model> {
     Ok(Model { cfg, t })
 }
 
+/// Рост в глубину: добавляет `add_layers` слоёв к ОДНОЙ модели.
+/// place: `end` — в конец; `spread` — равномерно между старыми слоями.
+/// init:  `ident` — новые слои «пустые» (wo и w2 = eps·обычная инициализация, при eps=0 это ровно 0):
+///        остаточные связи делают новую модель функционально равной старой, пока слои не обучились;
+///        `copy` — новые слои = копии соседних старых (как в stack/SOLAR/Gstack).
+fn grow(o: &Opts, m: &Model) -> Res<Model> {
+    let k = o.add_layers;
+    if k == 0 {
+        return Err("для grow нужен --add-layers N (N>0)".into());
+    }
+    if o.place != "end" && o.place != "spread" {
+        return Err(format!("--place: ожидалось end|spread, получено '{}'", o.place).into());
+    }
+    if o.init != "ident" && o.init != "copy" {
+        return Err(format!("--init: ожидалось ident|copy, получено '{}'", o.init).into());
+    }
+    if o.eps < 0.0 || !o.eps.is_finite() {
+        return Err("--eps должно быть числом >= 0".into());
+    }
+    let l0 = m.cfg.n_layers;
+    // slot: (источник, это_новый)
+    let mut plan: Vec<(usize, bool)> = Vec::with_capacity(l0 + k);
+    if o.place == "end" {
+        for l in 0..l0 {
+            plan.push((l, false));
+        }
+        let c = k.min(l0);
+        for i in 0..k {
+            plan.push((l0 - c + (i % c), true));
+        }
+    } else {
+        let mut ins = 0usize;
+        for l in 0..l0 {
+            plan.push((l, false));
+            while ins < k && (l + 1) * k >= (ins + 1) * l0 {
+                plan.push((l, true));
+                ins += 1;
+            }
+        }
+    }
+    debug_assert_eq!(plan.len(), l0 + k);
+    let cfg = Config { d_model: m.cfg.d_model, n_layers: l0 + k, n_heads: m.cfg.n_heads, seq_len: m.cfg.seq_len };
+    let fresh = Model::new(cfg.clone(), o.seed);
+    let mut t: Vec<Vec<f32>> = Vec::with_capacity(cfg.n_tensors());
+    for i in 0..BASE {
+        t.push(m.t[i].clone());
+    }
+    for (pos, &(src, is_new)) in plan.iter().enumerate() {
+        for j in 0..TPL {
+            let v = if !is_new {
+                m.t[BASE + src * TPL + j].clone()
+            } else if o.init == "copy" {
+                m.t[BASE + src * TPL + j].clone()
+            } else {
+                let mut v = fresh.t[BASE + pos * TPL + j].clone();
+                if j == 3 || j == 5 {
+                    for x in v.iter_mut() {
+                        *x *= o.eps;
+                    }
+                }
+                v
+            };
+            t.push(v);
+        }
+    }
+    Ok(Model { cfg, t })
+}
+
 fn flat_stats(base: &Model, ms: &[&Model]) {
     // косинус между векторами задач (W − base) по всем параметрам: близко к 0 — модели почти не мешают друг другу
     let taus: Vec<Vec<f64>> = ms
@@ -281,7 +353,16 @@ pub fn run(o: &Opts) -> Res<()> {
             flat_stats(b, &refs);
         }
     }
-    let out_model = if o.method == "stack" { stack(o, &refs)? } else { combine(o, base_model.as_ref(), &refs)? };
+    let out_model = match o.method.as_str() {
+        "stack" => stack(o, &refs)?,
+        "grow" => {
+            if refs.len() != 1 {
+                return Err("grow работает с ровно одной моделью (--model)".into());
+            }
+            grow(o, refs[0])?
+        }
+        _ => combine(o, base_model.as_ref(), &refs)?,
+    };
     let params: usize = out_model.t.iter().map(|v| v.len()).sum();
     println!("  результат: метод {}, d={} слоёв={} голов={} seq={}, параметров {:.2} млн", o.method, out_model.cfg.d_model, out_model.cfg.n_layers, out_model.cfg.n_heads, out_model.cfg.seq_len, params as f64 / 1e6);
     if out_model.t.iter().any(|v| v.iter().any(|x| !x.is_finite())) {
@@ -366,7 +447,7 @@ mod tests {
     }
 
     fn opts(method: &str) -> Opts {
-        Opts { method: method.into(), models: vec![], base: None, alphas: vec![], density: 1.0, lambda: 1.0, drop: 0.0, t: 0.5, take: vec![], globals: "first".into(), out: "x".into(), seed: 1 }
+        Opts { method: method.into(), models: vec![], base: None, alphas: vec![], density: 1.0, lambda: 1.0, drop: 0.0, t: 0.5, take: vec![], globals: "first".into(), out: "x".into(), seed: 1, add_layers: 0, place: "end".into(), init: "ident".into(), eps: 0.0 }
     }
 
     #[test]
@@ -438,5 +519,84 @@ mod tests {
         assert!((av.t[0][3] - 0.5 * (a.t[0][3] + b.t[0][3])).abs() < 1e-6);
         assert!(run(&o2).is_err()); // папка уже занята
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn small(l: usize, seed: u64) -> Model {
+        Model::new(Config { d_model: 16, n_layers: l, n_heads: 2, seq_len: 8 }, seed)
+    }
+    fn gopts(k: usize, place: &str, init: &str) -> Opts {
+        let mut o = opts("grow");
+        o.add_layers = k;
+        o.place = place.into();
+        o.init = init.into();
+        o
+    }
+    fn layer(m: &Model, l: usize, j: usize) -> &Vec<f32> {
+        &m.t[BASE + l * TPL + j]
+    }
+
+    #[test]
+    fn grow_end_ident_is_function_preserving_layout() {
+        let a = small(2, 1);
+        let g = grow(&gopts(2, "end", "ident"), &a).unwrap();
+        assert_eq!(g.cfg.n_layers, 4);
+        assert_eq!(g.t.len(), g.cfg.n_tensors());
+        for i in 0..g.t.len() {
+            let (r, c) = g.cfg.shape(i);
+            assert_eq!(g.t[i].len(), r * c);
+        }
+        for i in 0..BASE {
+            assert_eq!(g.t[i], a.t[i]);
+        }
+        for l in 0..2 {
+            for j in 0..TPL {
+                assert_eq!(layer(&g, l, j), layer(&a, l, j));
+            }
+        }
+        for l in 2..4 {
+            assert!(layer(&g, l, 3).iter().all(|&x| x == 0.0), "wo должен быть нулём");
+            assert!(layer(&g, l, 5).iter().all(|&x| x == 0.0), "w2 должен быть нулём");
+            assert!(layer(&g, l, 0).iter().any(|&x| x != 0.0), "wq должен быть случайным");
+            assert!(layer(&g, l, 6).iter().all(|&x| x == 1.0), "ln1_g = 1");
+        }
+    }
+
+    #[test]
+    fn grow_spread_positions() {
+        let a = small(4, 1);
+        let g = grow(&gopts(2, "spread", "ident"), &a).unwrap();
+        assert_eq!(g.cfg.n_layers, 6);
+        // порядок: O0 O1 N O2 O3 N
+        assert_eq!(layer(&g, 0, 0), layer(&a, 0, 0));
+        assert_eq!(layer(&g, 1, 0), layer(&a, 1, 0));
+        assert!(layer(&g, 2, 3).iter().all(|&x| x == 0.0));
+        assert_eq!(layer(&g, 3, 0), layer(&a, 2, 0));
+        assert_eq!(layer(&g, 4, 0), layer(&a, 3, 0));
+        assert!(layer(&g, 5, 5).iter().all(|&x| x == 0.0));
+    }
+
+    #[test]
+    fn grow_copy_and_eps_and_errors() {
+        let a = small(2, 1);
+        let g = grow(&gopts(1, "end", "copy"), &a).unwrap();
+        assert_eq!(g.cfg.n_layers, 3);
+        assert_eq!(layer(&g, 2, 3), layer(&a, 1, 3));
+        let mut o = gopts(1, "end", "ident");
+        o.eps = 0.01;
+        let ge = grow(&o, &a).unwrap();
+        let wo = layer(&ge, 2, 3);
+        assert!(wo.iter().any(|&x| x != 0.0));
+        let fresh = Model::new(ge.cfg.clone(), o.seed);
+        let big: f32 = layer(&fresh, 2, 3).iter().map(|x| x.abs()).sum();
+        let small_: f32 = wo.iter().map(|x| x.abs()).sum();
+        assert!((small_ / big - 0.01).abs() < 1e-4);
+        assert!(grow(&gopts(0, "end", "ident"), &a).is_err());
+        assert!(grow(&gopts(1, "middle", "ident"), &a).is_err());
+        assert!(grow(&gopts(1, "end", "zzz"), &a).is_err());
+        // K > L не падает
+        let g3 = grow(&gopts(5, "spread", "copy"), &small(2, 3)).unwrap();
+        assert_eq!(g3.cfg.n_layers, 7);
+        let g4 = grow(&gopts(5, "end", "ident"), &small(2, 3)).unwrap();
+        assert_eq!(g4.cfg.n_layers, 7);
     }
 }

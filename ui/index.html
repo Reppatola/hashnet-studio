@@ -76,6 +76,12 @@ canvas{width:100%;height:160px;background:var(--bg);border:1px solid var(--bd);b
   <label>Папка для текстов</label><div class="row"><input id="sc_out"><button class="b s nf" data-pick="dir:sc_out">Выбрать…</button></div>
   <div class="row"><div><label>Языки (через запятую, пусто — все)</label><input id="sc_only" placeholder="rust,python"></div><div><label>Макс. ГБ на язык (0 — без лимита)</label><input id="sc_gb" type="number" value="0" step="0.5"></div></div>
   <button class="b" id="bSc">Конвертировать</button></div>
+ <div class="card"><h2>5. Нарезка на непересекающиеся куски (для нескольких моделей)</h2>
+  <p class="hint">Режет большой файл на N кусков с РАЗНЫМ содержимым. «chunks» — куски равномерно из всего файла (одинаковое качество); «contiguous» — каждый кусок из своей области файла. Размер куска можно ограничить: для веток из этапа «Слияние» хватает 0.3–0.5 ГБ на кусок.</p>
+  <label>Исходный файл</label><div class="row"><input id="sh_src"><button class="b s nf" data-pick="file:sh_src">Выбрать…</button></div>
+  <label>Папка для кусков</label><div class="row"><input id="sh_out"><button class="b s nf" data-pick="dir:sh_out">Папка…</button></div>
+  <div class="row"><div><label>Число кусков</label><input id="sh_n" type="number" value="6" min="2"></div><div><label>Макс. ГБ на кусок (0 — без лимита)</label><input id="sh_gb" type="number" value="0.5" step="0.1" min="0"></div><div><label>Режим</label><select id="sh_mode"><option value="chunks">chunks — равномерно из всего файла</option><option value="contiguous">contiguous — подряд идущие области</option></select></div></div>
+  <button class="b" id="bShards">Нарезать</button></div>
  <div class="card"><h2>Ход работы</h2><div id="dlog"></div></div>
 </section>
 
@@ -105,16 +111,27 @@ canvas{width:100%;height:160px;background:var(--bg);border:1px solid var(--bd);b
 
 <section class="tabp" id="t-merge">
  <div class="card"><h2>Слияние моделей</h2>
-  <label>Метод</label><select id="mg_m"><option value="avg">avg — усреднение (размер тот же)</option><option value="slerp">slerp — сферическое для двух моделей</option><option value="task">task — арифметика задач (нужна база)</option><option value="ties">ties — TIES (нужна база)</option><option value="dare">dare — DARE (нужна база)</option><option value="stack">stack — склейка слоёв (модель становится глубже)</option></select>
+  <label>Метод</label><select id="mg_m"><option value="avg">avg — усреднение (размер тот же)</option><option value="slerp">slerp — сферическое для двух моделей</option><option value="task">task — арифметика задач (нужна база)</option><option value="ties">ties — TIES (нужна база)</option><option value="dare">dare — DARE (нужна база)</option><option value="stack">stack — склейка слоёв (модель становится глубже)</option><option value="grow">grow — добавить слои к одной модели (рост в глубину)</option></select>
   <div class="hint" id="mg_h"></div>
   <label>Модели (папки чекпойнтов)</label><div id="mgl"></div><button class="b s" data-add="mg">+ Добавить модель</button>
   <div id="mg_baseB"><label>База (общий предок — модель до разных дообучений)</label><div class="row"><input id="mg_base"><button class="b s nf" data-pick="dir:mg_base">Выбрать…</button></div></div>
   <div class="row"><div><label>alpha (веса через запятую)</label><input id="mg_a" placeholder="0.5,0.5"></div><div><label>t (slerp)</label><input id="mg_t" value="0.5"></div><div><label>density (ties/dare)</label><input id="mg_den" value="0.2"></div><div><label>lambda</label><input id="mg_lam" value="1.0"></div><div><label>drop (dare)</label><input id="mg_dr" value="0.3"></div></div>
   <div class="row"><div><label>take (stack, напр. 0-6,0-6)</label><input id="mg_tk" placeholder="0-6,0-6"></div><div><label>globals (stack)</label><select id="mg_gl"><option value="">first</option><option>last</option><option>avg</option></select></div></div>
+  <div id="mg_growB" style="display:none"><div class="row"><div><label>Сколько слоёв добавить</label><input id="mg_add" type="number" value="8" min="1"></div><div><label>Куда добавить</label><select id="mg_pl"><option value="end">в конец</option><option value="spread">равномерно между старыми</option></select></div><div><label>Чем заполнить</label><select id="mg_in"><option value="ident">«пустые» (модель не меняется)</option><option value="copy">копии соседних слоёв</option></select></div><div><label>eps (для «пустых»)</label><input id="mg_eps" value="0"></div></div><div class="hint">Для «grow» выберите ровно одну модель. «Пустые» слои дают точно ту же модель, что была (проверка: val «ДО фазы» при дообучении должен совпасть с val исходной); затем дообучайте — новые слои начнут учиться.</div></div>
   <label>Куда сохранить (новая пустая папка)</label><div class="row"><input id="mg_out"><button class="b s nf" data-pick="dir:mg_out">Папка…</button></div>
   <div style="margin-top:10px"><button class="b" id="bMerge">Слить</button></div>
   <pre class="cmd" id="mgcmd" style="display:none"></pre>
   <div class="hint">Слияние работает на процессоре и в ОЗУ. Усреднять имеет смысл только модели одной архитектуры с общим происхождением (одна инициализация). После stack модель нужно дообучить («залечить»).</div></div>
+ <div class="card"><h2>Эксперимент: ветки от общей базы → слияние → проверка</h2>
+  <p class="hint">Одной кнопкой: для каждого куска данных создаётся ветка от базы и дообучается коротко (малый LR, чтобы ветки остались «рядом»), затем ветки сливаются (среднее и TIES от базы), после чего у базы, веток и слитых моделей измеряется val на данных базы и печатается итоговая таблица. Делается в одном окне «Логи» — можно уйти и вернуться; «Стоп» сохраняет текущую ветку.</p>
+  <label>База (общий предок)</label><select id="br_base"></select>
+  <label>Куски данных (по одному на ветку)</label><div id="brl"></div>
+  <div class="row"><button class="b s nf" data-add="br">+ Добавить файл</button><button class="b s nf" id="brFolder">Добавить shard_*.txt из папки…</button></div>
+  <div class="row"><div><label>Шагов на ветку</label><input id="br_steps" type="number" value="4000"></div><div><label>LR</label><input id="br_lr" value="0.0003"></div><div><label>Warmup</label><input id="br_wu" type="number" value="100"></div><div><label>Batch</label><input id="br_b" type="number" value="8"></div></div>
+  <div class="row" style="margin-top:6px"><div class="chk"><input type="checkbox" id="br_avg" checked> слить: среднее (avg)</div><div class="chk"><input type="checkbox" id="br_ties" checked> слить: TIES от базы</div><div class="chk"><input type="checkbox" id="br_eval" checked> проверить val у всех</div></div>
+  <label>Папка результата (новая)</label><div class="row"><input id="br_out"><button class="b s nf" data-pick="dir:br_out">Папка…</button></div>
+  <div class="row" style="margin-top:10px"><button class="b" id="bBr">▶ Запустить пакет</button><button class="b d" id="bBrStop">■ Стоп</button></div>
+  <pre class="cmd" id="brcmd" style="display:none"></pre></div>
  <div class="card"><h2>Ход слияния</h2><pre class="log" id="mglog"></pre></div>
 </section>
 
@@ -126,6 +143,10 @@ canvas{width:100%;height:160px;background:var(--bg);border:1px solid var(--bd);b
   <div id="chat"></div>
   <div class="row" style="margin-top:8px"><textarea id="c_in" rows="2" placeholder="Начало текста или кода… (модель продолжает, а не отвечает)"></textarea><button class="b nf" id="bGen">Отправить</button></div>
   <div class="row" style="margin-top:6px"><button class="b s nf" id="bClr">Очистить чат</button></div></div>
+ <div class="card"><h2>Метрика кода: доля синтаксически корректного Rust</h2>
+  <p class="hint">Модель продолжает N начал функций/структур; считается, сколько результатов закрылись скобками и разобрались парсером Rust (нужен rustfmt). Бит/байт этого не показывает. Для сравнения моделей запускайте с одинаковыми N и длиной.</p>
+  <div class="row"><div><label>Фрагментов (N)</label><input id="sy_n" type="number" value="40"></div><div><label>Длина, байт</label><input id="sy_len" type="number" value="400"></div><button class="b nf" id="bSyn" style="margin-top:20px">Проверить выбранную модель</button></div>
+  <pre class="log" id="synlog" style="height:200px"></pre></div>
 </section>
 
 <section class="tabp" id="t-logs">
@@ -179,10 +200,10 @@ $('modal').onclick=e=>{const g=e.target.closest('[data-go]'),f=e.target.closest(
 $('mcancel').onclick=()=>$('modal').style.display='none';
 $('mok').onclick=()=>{$('modal').style.display='none';pickCb(pickPath)};
 document.addEventListener('click',e=>{const b=e.target.closest('[data-pick]');if(!b)return;const[m,id]=b.dataset.pick.split(':');
- pick(m,p=>{const el=$(id);if(m==='dir'&&/^(sm_dst|mx_out|mg_out)$/.test(id)){const nm={sm_dst:'sample.txt',mx_out:'mix.txt',mg_out:'merged'}[id];el.value=p+'/'+nm}else el.value=p;el.dispatchEvent(new Event('input'));if(id==='sp_src'&&!$('sp_out').value)$('sp_out').value=p.replace(/\/[^/]*$/,'')+'/split_out'},$(id).value?$(id).value.replace(/\/[^/]*$/,''):'')});
+ pick(m,p=>{const el=$(id);if(m==='dir'&&/^(sm_dst|mx_out|mg_out|br_out|sh_out)$/.test(id)){const nm={sm_dst:'sample.txt',mx_out:'mix.txt',mg_out:'merged',br_out:'exp5',sh_out:'shards'}[id];el.value=p+'/'+nm}else el.value=p;el.dispatchEvent(new Event('input'));if(id==='sp_src'&&!$('sp_out').value)$('sp_out').value=p.replace(/\/[^/]*$/,'')+'/split_out'},$(id).value?$(id).value.replace(/\/[^/]*$/,''):'')});
 
 // ── списки файлов
-const LISTS={mix:{el:'mixl',rows:[],w:true},tr:{el:'trdata',rows:[],w:true},mg:{el:'mgl',rows:[],w:false}};
+const LISTS={mix:{el:'mixl',rows:[],w:true},tr:{el:'trdata',rows:[],w:true},mg:{el:'mgl',rows:[],w:false},br:{el:'brl',rows:[],w:false}};
 function drawList(k){const L=LISTS[k];$(L.el).innerHTML=L.rows.length?L.rows.map((r,i)=>`<div class="row" style="margin-bottom:5px;align-items:center"><input value="${esc(r.path)}" data-li="${k}:${i}:path">${L.w?`<input class="nf" style="width:90px;flex:none" value="${esc(r.weight||'')}" placeholder="вес" data-li="${k}:${i}:weight">`:''}<button class="b s nf" data-rm="${k}:${i}">✕</button></div>`).join(''):'<div class="hint">пусто</div>';if(k==='mg')mgCmdHint()}
 document.addEventListener('input',e=>{const d=e.target.dataset.li;if(!d)return;const[k,i,f]=d.split(':');LISTS[k].rows[+i][f]=e.target.value});
 document.addEventListener('click',e=>{const a=e.target.closest('[data-add]');if(a){const k=a.dataset.add;pick('file',p=>{LISTS[k].rows.push({path:p,weight:''});drawList(k)},LISTS[k].rows.length?LISTS[k].rows.slice(-1)[0].path.replace(/\/[^/]*$/,''):(ST&&ST.conf.workspace+'/data'));
@@ -215,10 +236,11 @@ $('bBuild').onclick=()=>run('build',{},'build');
 $('bConf').onclick=async()=>{try{await api('/api/conf',{project_dir:$('s_proj').value,workspace:$('s_ws').value,cargo:$('s_cargo').value,python:$('s_py').value});toast('Сохранено');refresh()}catch(e){toast(e.message,1)}};
 
 // ── Данные
-function fillDefaults(){const w=ST.conf.workspace;if(!$('sp_out').value)$('sp_out').value=w+'/data/split_out';if(!$('sm_dst').value)$('sm_dst').value=w+'/data/sample.txt';if(!$('mx_out').value)$('mx_out').value=w+'/data/mix.txt';if(!$('sc_out').value)$('sc_out').value=w+'/data/code_txt';if(!$('mg_out').value)$('mg_out').value=w+'/checkpoints/merged';if(!$('tr_dir').value)$('tr_dir').value=w+'/checkpoints/model1';$('s_proj').value=ST.conf.project_dir;$('s_ws').value=w;$('s_cargo').value=ST.conf.cargo;$('s_py').value=ST.conf.python;$('readme').href='/readme?t='+encodeURIComponent(TOKEN)}
+function fillDefaults(){const w=ST.conf.workspace;if(!$('sp_out').value)$('sp_out').value=w+'/data/split_out';if(!$('sm_dst').value)$('sm_dst').value=w+'/data/sample.txt';if(!$('mx_out').value)$('mx_out').value=w+'/data/mix.txt';if(!$('sc_out').value)$('sc_out').value=w+'/data/code_txt';if(!$('mg_out').value)$('mg_out').value=w+'/checkpoints/merged';if(!$('br_out').value)$('br_out').value=w+'/checkpoints/exp5';if(!$('sh_out').value)$('sh_out').value=w+'/data/shards';if(!$('tr_dir').value)$('tr_dir').value=w+'/checkpoints/model1';$('s_proj').value=ST.conf.project_dir;$('s_ws').value=w;$('s_cargo').value=ST.conf.cargo;$('s_py').value=ST.conf.python;$('readme').href='/readme?t='+encodeURIComponent(TOKEN)}
 $('bSplit').onclick=()=>run('split',{src:$('sp_src').value,out:$('sp_out').value,dry_run:$('sp_dry').checked,keep_generated:$('sp_gen').checked,limit_gb:$('sp_lim').value},'data');
 $('bSample').onclick=()=>run('sample',{src:$('sm_src').value,dst:$('sm_dst').value,gb:$('sm_gb').value,chunk_mb:$('sm_ch').value},'data');
 $('bMix').onclick=()=>run('mix',{files:LISTS.mix.rows,out:$('mx_out').value,target_gb:$('mx_t').value},'data');
+$('bShards').onclick=()=>run('shards',{src:$('sh_src').value,out:$('sh_out').value,n:$('sh_n').value,max_gb_each:$('sh_gb').value,mode:$('sh_mode').value},'data');
 $('bSc').onclick=()=>run('starcoder',{src:$('sc_src').value,out:$('sc_out').value,only:$('sc_only').value,max_gb:$('sc_gb').value},'data');
 
 // ── Обучение
@@ -242,19 +264,24 @@ $('bTrain').onclick=async()=>{const p={steps:$('tr_steps').value,batch:$('tr_bat
 $('bStop').onclick=async()=>{const id=$('bStop').dataset.id;if(!id)return;try{await api('/api/stop',{id:+id});toast('Останавливаю — подождите сохранения чекпойнта…')}catch(e){toast(e.message,1)}};
 
 // ── Слияние
-const MH={avg:'Среднее весов. Работает для моделей одной архитектуры с общим предком. Размер не растёт.',slerp:'Сферическая интерполяция двух моделей (параметр t).',task:'База + сумма разностей (модель − база)·alpha. Нужна общая база.',ties:'TIES: оставляет самые крупные изменения и согласует знаки. Нужна общая база.',dare:'DARE: случайно отбрасывает часть изменений (drop) и перенормирует. Нужна общая база.',stack:'Склейка слоёв: из двух 6-слойных получается 12-слойная (take: «0-6,0-6»). Размер растёт; после склейки нужно дообучить.'};
-function mgCmdHint(){const m=$('mg_m').value;$('mg_h').textContent=MH[m];$('mg_baseB').style.display=/task|ties|dare/.test(m)?'':'none'}
+const MH={avg:'Среднее весов. Работает для моделей одной архитектуры с общим предком. Размер не растёт.',slerp:'Сферическая интерполяция двух моделей (параметр t).',task:'База + сумма разностей (модель − база)·alpha. Нужна общая база.',ties:'TIES: оставляет самые крупные изменения и согласует знаки. Нужна общая база.',dare:'DARE: случайно отбрасывает часть изменений (drop) и перенормирует. Нужна общая база.',grow:'Рост в глубину: к одной модели добавляется N слоёв («пустых» — функция сохраняется, или копий соседних). Потом дообучить.',stack:'Склейка слоёв: из двух 6-слойных получается 12-слойная (take: «0-6,0-6»). Размер растёт; после склейки нужно дообучить.'};
+function mgCmdHint(){const m=$('mg_m').value;$('mg_h').textContent=MH[m];$('mg_baseB').style.display=/task|ties|dare/.test(m)?'':'none';$('mg_growB').style.display=m==='grow'?'':'none'}
 $('mg_m').onchange=mgCmdHint;mgCmdHint();
-$('bMerge').onclick=async()=>{const p={method:$('mg_m').value,models:LISTS.mg.rows.map(r=>r.path),base:$('mg_base').value,out:$('mg_out').value,alpha:$('mg_a').value,t:$('mg_t').value,density:$('mg_den').value,lambda:$('mg_lam').value,drop:$('mg_dr').value,take:$('mg_tk').value,globals:$('mg_gl').value};
+$('bMerge').onclick=async()=>{const p={method:$('mg_m').value,models:LISTS.mg.rows.map(r=>r.path),base:$('mg_base').value,out:$('mg_out').value,alpha:$('mg_a').value,t:$('mg_t').value,density:$('mg_den').value,lambda:$('mg_lam').value,drop:$('mg_dr').value,take:$('mg_tk').value,globals:$('mg_gl').value,add_layers:$('mg_add').value,place:$('mg_pl').value,init:$('mg_in').value,eps:$('mg_eps').value};
  const r=await run('merge',p,'merge');if(r){$('mgcmd').style.display='';$('mgcmd').textContent='Эквивалент в терминале:\n'+r.cmd;mgFrom=0;$('mglog').textContent=''}};
 
+// ── Ветки
+$('bBr').onclick=async()=>{const p={base:$('br_base').value,shards:LISTS.br.rows.map(r=>r.path).filter(Boolean),steps:$('br_steps').value,lr:$('br_lr').value,warmup:$('br_wu').value,batch:$('br_b').value,m_avg:$('br_avg').checked,m_ties:$('br_ties').checked,eval:$('br_eval').checked,out:$('br_out').value};
+ const r=await run('branches',p,'merge');if(r){mgFrom=0;$('mglog').textContent='';$('brcmd').style.display='';$('brcmd').textContent='Задача №'+r.id+' (команды — во вкладке «Логи»)';tab('merge')}};
+$('bBrStop').onclick=async()=>{const id=runs.branches||(ST.jobs.find(j=>j.kind==='branches'&&j.status==='running')||{}).id;if(!id)return toast('Пакет не запущен',1);try{await api('/api/stop',{id});toast('Останавливаю — подождите сохранения…')}catch(e){toast(e.message,1)}};
+$('brFolder').onclick=()=>pick('dir',async d=>{try{const r=await api('/api/fs?path='+encodeURIComponent(d));const f=r.entries.filter(e=>!e.dir&&/^shard_\d+\.txt$/.test(e.name)).sort((a,b)=>parseInt(a.name.slice(6))-parseInt(b.name.slice(6)));if(!f.length)return toast('В папке нет shard_N.txt',1);LISTS.br.rows=f.map(e=>({path:r.path.replace(/\/$/,'')+'/'+e.name,weight:''}));drawList('br');toast('Добавлено кусков: '+f.length)}catch(e){toast(e.message,1)}},LISTS.br.rows.length?'':(ST&&ST.conf.workspace+'/data'));
 // ── Чат
 let chatCk=null,hist=J('chat')||[];
 function drawCkSelectors(){if(!ST)return;const c=ST.ckpts;if(!chatCk&&c.length)chatCk=c[0].dir;
  $('chatCk').innerHTML=c.length?`<select id="chsel">${c.map(x=>`<option value="${esc(x.dir)}" ${x.dir===chatCk?'selected':''}>${esc(x.name)} — ${fmtP(x.meta.params)}, шаг ${x.meta.step}</option>`).join('')}</select>`:'<div class="hint">нет моделей</div>';
  if($('chsel'))$('chsel').onchange=e=>chatCk=e.target.value;
  // списки моделей для слияния — быстрый выбор
- const q=$('mgQuick');}
+ const cur=$('br_base').value;$('br_base').innerHTML=c.map(x=>`<option value="${esc(x.dir)}">${esc(x.name)} — ${fmtP(x.meta.params)}, шаг ${x.meta.step}</option>`).join('');if(cur&&[...$('br_base').options].some(o=>o.value===cur))$('br_base').value=cur;}
 function drawChat(){$('chat').innerHTML=hist.map(m=>`<div class="m ${m.r}">${esc(m.t)}</div>`).join('');$('chat').scrollTop=1e9}drawChat();
 function extract(lines){let s=lines.findIndex(l=>/инференс/.test(l));let e=lines.findIndex((l,i)=>i>s&&/\[\d+\s*байт/.test(l));if(s<0)s=-1;return lines.slice(s+1,e<0?undefined:e).join('\n')}
 $('bGen').onclick=async()=>{const pr=$('c_in').value;if(!chatCk)return toast('Выберите модель',1);hist.push({r:'u',t:pr||'(пусто)'});const ph={r:'a',t:'…'};hist.push(ph);drawChat();$('c_in').value='';
@@ -262,10 +289,11 @@ $('bGen').onclick=async()=>{const pr=$('c_in').value;if(!chatCk)return toast('В
   for(let k=0;k<3000;k++){await new Promise(z=>setTimeout(z,700));const j=await api('/api/job?id='+r.id);ph.t=(extract(j.lines)||(j.live||'…'));
    if(j.status!=='running'&&j.status!=='queued'){if(j.status==='failed')ph.t='ОШИБКА:\n'+j.lines.slice(-8).join('\n');else{ph.t=extract(j.lines)||pr}break}drawChat()}
  }catch(e){ph.t='ОШИБКА: '+e.message}SV('chat',hist.slice(-60));drawChat()};
+$('bSyn').onclick=async()=>{if(!chatCk)return toast('Выберите модель',1);const r=await run('syntax',{ckpt:chatCk,n:$('sy_n').value,len:$('sy_len').value},'syn');if(r){synFrom=0;$('synlog').textContent=''}};
 $('bClr').onclick=()=>{hist=[];SV('chat',[]);drawChat()};
 
 // ── Логи, прогресс
-let logSel=null,logFrom=0,trFrom=0,mgFrom=0,trLines=[],pts=[],tdata={},dFrom={};
+let synFrom=0,logSel=null,logFrom=0,trFrom=0,mgFrom=0,trLines=[],pts=[],tdata={},dFrom={};
 function drawChart(){const c=$('chart'),x=c.getContext('2d');x.clearRect(0,0,c.width,c.height);if(pts.length<4)return;
  const cs=getComputedStyle(document.body);const skip=Math.min(Math.floor(pts.length*0.04),pts.length-3);const base=pts.slice(skip);
  const W=Math.max(3,Math.floor(base.length/60));const sm=base.map((p,i)=>{let s=0,n=0;for(let k=Math.max(0,i-W);k<=i;k++){s+=base[k][1];n++}return[p[0],s/n]});
@@ -282,18 +310,18 @@ function parseTrain(lines){for(const l of lines){let m=l.match(/\[\s*(\d+)\s*\/\
 function drawTrain(running){const t=tdata;$('pbar').style.width=(t.total?100*t.step/t.total:0)+'%';
  $('tstats').innerHTML=[['Шаг',t.step?t.step+' / '+t.total:'—'],['бит/байт',t.bpb||'—'],['val',t.vbpb||'—'],['скорость',t.tps?t.tps+' ток/с':'—'],['осталось',t.eta||'—'],['lr',t.lr||'—']].map(x=>`<div><b>${x[1]}</b><span>${x[0]}</span></div>`).join('');drawChart()}
 let busy=false;
-async function tick(){if(busy)return;busy=true;try{
- // обучение
- const tid=followers.train||J('follow:train');
- if(tid){const j=await api('/api/job?id='+tid+'&from='+trFrom);if(j.lines.length||trFrom===0){parseTrain(j.lines);const el=$('trlog');const atEnd=el.scrollTop+el.clientHeight>el.scrollHeight-30;el.textContent=(trFrom?el.textContent.replace(/\n⟳.*$/,'')+'\n':'')+j.lines.join('\n')+(j.live?'\n⟳ '+j.live:'');if(atEnd)el.scrollTop=1e9;trFrom=j.next;if(j.live){const m=j.live;parseTrain([m])}}else if(j.live){const el=$('trlog');el.textContent=el.textContent.replace(/\n⟳.*$/,'')+'\n⟳ '+j.live}
-  drawTrain(j.status==='running');if(!followers.train)followers.train=tid;if(j.cmd&&$('trcmd').style.display==='none'){$('trcmd').style.display='';$('trcmd').textContent='Эквивалент в терминале:\n'+j.cmd}}
- const mid=followers.merge||J('follow:merge');if(mid){const j=await api('/api/job?id='+mid+'&from='+mgFrom);if(j.lines.length){$('mglog').textContent+=j.lines.join('\n')+'\n';mgFrom=j.next;$('mglog').scrollTop=1e9}}
- const did=followers.data||J('follow:data');if(did){const f=dFrom[did]||0;const j=await api('/api/job?id='+did+'&from='+f);dFrom[did]=j.next;let h=$('dlog').dataset.id==did?$('dlog').dataset.txt||'':'';h+=j.lines.join('\n')+(j.lines.length?'\n':'');$('dlog').dataset.id=did;$('dlog').dataset.txt=h;
+async function jobGet(key,id,from){try{return await api('/api/job?id='+id+'&from='+from)}catch(e){if(/нет такой/.test(e.message)){try{localStorage.removeItem('follow:'+key)}catch(_){}delete followers[key]}return null}}
+async function tick(){if(busy)return;busy=true;
+ try{const tid=followers.train||J('follow:train');
+  if(tid){const j=await jobGet('train',tid,trFrom);if(j){if(j.lines.length||trFrom===0){parseTrain(j.lines);const el=$('trlog');const atEnd=el.scrollTop+el.clientHeight>el.scrollHeight-30;el.textContent=(trFrom?el.textContent.replace(/\n⟳.*$/,'')+'\n':'')+j.lines.join('\n')+(j.live?'\n⟳ '+j.live:'');if(atEnd)el.scrollTop=1e9;trFrom=j.next;if(j.live)parseTrain([j.live])}else if(j.live){const el=$('trlog');el.textContent=el.textContent.replace(/\n⟳.*$/,'')+'\n⟳ '+j.live}
+   drawTrain(j.status==='running');if(!followers.train)followers.train=tid;if(j.cmd&&$('trcmd').style.display==='none'){$('trcmd').style.display='';$('trcmd').textContent='Эквивалент в терминале:\n'+j.cmd}}}}catch(e){}
+ try{const mid=followers.merge||J('follow:merge');if(mid){const j=await jobGet('merge',mid,mgFrom);if(j&&j.lines.length){$('mglog').textContent+=j.lines.join('\n')+'\n';mgFrom=j.next;$('mglog').scrollTop=1e9}}}catch(e){}
+ try{const yid=followers.syn||J('follow:syn');if(yid){const j=await jobGet('syn',yid,synFrom);if(j&&(j.lines.length||j.live)){const el=$('synlog');el.textContent=el.textContent.replace(/\n⟳.*$/,'')+(j.lines.length?(el.textContent?'\n':'')+j.lines.join('\n'):'')+(j.live?'\n⟳ '+j.live:'');synFrom=j.next;el.scrollTop=1e9}}}catch(e){}
+ try{const did=followers.data||J('follow:data');if(did){const f=dFrom[did]||0;const j=await jobGet('data',did,f);if(j){dFrom[did]=j.next;let h=$('dlog').dataset.id==did?$('dlog').dataset.txt||'':'';h+=j.lines.join('\n')+(j.lines.length?'\n':'');$('dlog').dataset.id=did;$('dlog').dataset.txt=h;
   $('dlog').innerHTML=`<div>${jobBadge(j)} ${esc(j.title)} <span class="mut">№${j.id}</span></div><pre class="log" style="height:300px">${esc(h.split('\n').slice(-400).join('\n'))}${j.live?'\n'+esc(j.live):''}</pre>`;
-  const pl=$('dlog').querySelector('pre');pl.scrollTop=1e9}
- // выбранный лог
- if(logSel){const j=await api('/api/job?id='+logSel+'&from='+logFrom);const el=$('jlog');if(logFrom===0)el.textContent='';el.textContent=el.textContent.replace(/\n⟳.*$/,'')+(j.lines.length?(el.textContent?'\n':'')+j.lines.join('\n'):'')+(j.live?'\n⟳ '+j.live:'');logFrom=j.next;if(j.lines.length)el.scrollTop=1e9;$('jhead').innerHTML=`№${j.id} ${esc(j.title)} ${jobBadge(j)} · лог: ${esc(j.log_path)}`;$('jcmd').style.display='';$('jcmd').textContent=j.cmd;$('jstop').disabled=j.status!=='running'}
- }catch(e){}busy=false}
+  const pl=$('dlog').querySelector('pre');pl.scrollTop=1e9}}}catch(e){}
+ try{if(logSel){const j=await api('/api/job?id='+logSel+'&from='+logFrom);const el=$('jlog');if(logFrom===0)el.textContent='';el.textContent=el.textContent.replace(/\n⟳.*$/,'')+(j.lines.length?(el.textContent?'\n':'')+j.lines.join('\n'):'')+(j.live?'\n⟳ '+j.live:'');logFrom=j.next;if(j.lines.length)el.scrollTop=1e9;$('jhead').innerHTML=`№${j.id} ${esc(j.title)} ${jobBadge(j)} · лог: ${esc(j.log_path)}`;$('jcmd').style.display='';$('jcmd').textContent=j.cmd;$('jstop').disabled=j.status!=='running'}}catch(e){$('jhead').textContent='Не удалось прочитать лог: '+e.message}
+ busy=false}
 $('jstop').onclick=async()=>{if(logSel)try{await api('/api/stop',{id:logSel});toast('Остановка…')}catch(e){toast(e.message,1)}};
 async function refresh(){try{ST=await api('/api/state');if(!refresh.f){refresh.f=1;fillDefaults()}drawState()}catch(e){$('gpu').textContent='нет связи с сервером'}}
 Object.keys(LISTS).forEach(drawList);

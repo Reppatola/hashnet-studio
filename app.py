@@ -48,6 +48,19 @@ JOB_SEQ = [0]
 JOBS_LOCK = threading.Lock()
 
 
+def init_job_seq():
+    """номера задач продолжаются после перезапуска (по именам файлов в logs/)"""
+    mx = 0
+    try:
+        for fn in os.listdir(ws("logs")):
+            m = re.match(r"^\d{8}_\d{6}_(\d+)_", fn)
+            if m:
+                mx = max(mx, int(m.group(1)))
+    except Exception:
+        pass
+    JOB_SEQ[0] = mx
+
+
 class Job:
     def __init__(self, kind, title, steps, gpu=False):
         with JOBS_LOCK:
@@ -401,15 +414,29 @@ def action_gen(p):
 
 def action_merge(p):
     method = p.get("method")
-    if method not in ("avg", "slerp", "task", "ties", "dare", "stack"):
+    if method not in ("avg", "slerp", "task", "ties", "dare", "stack", "grow"):
         raise ValueError("неизвестный метод")
     models = p.get("models") or []
     if not models:
         raise ValueError("не выбрано ни одной модели")
     out = path_arg(p, "out")
     a = ["merge", "--method", method, "--out", out]
+    if method == "grow" and len(models) != 1:
+        raise ValueError("grow работает с одной моделью")
     for m in models:
         a += ["--model", path_arg({"x": m}, "x", must_exist=True)]
+    if method == "grow":
+        a += ["--add-layers", num(p, "add_layers", int, required=True, lo=1, hi=256)]
+        for k, flag, allowed in (("place", "--place", ("end", "spread")), ("init", "--init", ("ident", "copy"))):
+            v = str(p.get(k) or "")
+            if v:
+                if v not in allowed:
+                    raise ValueError(f"поле «{k}»: допустимо {'/'.join(allowed)}")
+                a += [flag, v]
+        if str(p.get("init") or "ident") == "ident":
+            eps = num(p, "eps", float, None, 0, 10)
+            if eps is not None:
+                a += ["--eps", eps]
     if method in ("task", "ties", "dare"):
         a += ["--base", path_arg(p, "base", must_exist=True)]
     for k, flag, typ in (("density", "--density", float), ("lambda", "--lambda", float), ("drop", "--drop", float), ("t", "--t", float), ("seed", "--seed", int)):
@@ -505,17 +532,151 @@ def action_starcoder(p):
     return Job("starcoder", "StarCoder → текст", py_tool("starcoder_to_txt.py", a))
 
 
+def action_shards(p):
+    n = num(p, "n", int, required=True, lo=2, hi=64)
+    a = [path_arg(p, "src", must_exist=True), "--out", path_arg(p, "out"), "--n", n]
+    g = num(p, "max_gb_each", float, 0, 0)
+    if g:
+        a += ["--max-gb-each", g]
+    mode = str(p.get("mode") or "chunks")
+    if mode not in ("chunks", "contiguous"):
+        raise ValueError("режим: chunks или contiguous")
+    a += ["--mode", mode]
+    return Job("shards", "Нарезка на непересекающиеся куски", py_tool("make_shards.py", a))
+
+
+def _latest_ckpt_file(d):
+    cks = sorted(f for f in os.listdir(d) if f.startswith("ckpt_") and f.endswith(".bin"))
+    if not cks:
+        raise ValueError(f"в папке нет чекпойнтов: {d}")
+    return os.path.join(d, cks[-1])
+
+
+def action_branches(p):
+    """Пакет: ветки от общей базы на разных кусках данных → слияние → проверка val у всех."""
+    base = path_arg(p, "base", must_exist=True)
+    base_file = _latest_ckpt_file(base)
+    bmeta = read_ckpt_meta(base_file)
+    if not bmeta or not bmeta["files"]:
+        raise ValueError("не удалось прочитать чекпойнт базы")
+    key = os.path.basename(bmeta["files"][0]["path"])
+    shards = [path_arg({"x": (s.get("path") if isinstance(s, dict) else s)}, "x", must_exist=True) for s in (p.get("shards") or [])]
+    if len(shards) < 2:
+        raise ValueError("нужно минимум 2 куска данных")
+    out = path_arg(p, "out")
+    if os.path.isdir(out) and os.listdir(out):
+        raise ValueError(f"папка результата не пуста: {out} (укажите новую)")
+    steps = num(p, "steps", int, 4000, 1)
+    lr = num(p, "lr", float, 3e-4, 1e-9, 1)
+    warm = num(p, "warmup", int, 100, 0)
+    batch = num(p, "batch", int, 8, 1)
+    merges = [m for m in ("avg", "ties") if p.get("m_" + m)]
+    do_eval = bool(p.get("eval", True))
+    if not project_ok():
+        raise ValueError(f"в папке проекта нет Cargo.toml: {CONF['project_dir']}")
+    exe = bin_path()
+    cwd = CONF["project_dir"]
+    holder = {}
+    steps_l = []
+    if need_build():
+        steps_l.append(([CONF["cargo"], "build", "--release", "--bin", "hashnet_proto"], cwd))
+    bdirs = [os.path.join(out, f"branch_{i + 1}") for i in range(len(shards))]
+
+    def prep(emit):
+        for bd in bdirs:
+            os.makedirs(bd, exist_ok=True)
+            shutil.copy2(base_file, os.path.join(bd, os.path.basename(base_file)))
+        emit(f"скопирована база ({os.path.basename(base_file)}) в {len(bdirs)} папок веток")
+    steps_l.append(("call", prep, "подготовка веток"))
+    for i, (bd, sh) in enumerate(zip(bdirs, shards)):
+        args = ["train", "--resume", "--ckpt-dir", bd, "--data", sh, "--steps", steps, "--lr", lr, "--warmup", warm,
+                "--batch", batch, "--replay-frac", 0, "--ckpt-every", 1000, "--eval-every", 0]
+        steps_l.append(([exe] + [str(x) for x in args], cwd))
+    merged = []
+    for m in merges:
+        md = os.path.join(out, "merged_" + m)
+        args = ["merge", "--method", m, "--out", md] + sum([["--model", bd] for bd in bdirs], [])
+        if m == "ties":
+            args += ["--base", base, "--density", 0.2, "--lambda", 1.0]
+        steps_l.append(([exe] + [str(x) for x in args], cwd))
+        merged.append(("merged_" + m, md))
+    if do_eval:
+        targets = [("base", base)] + [(f"branch_{i + 1}", bd) for i, bd in enumerate(bdirs)] + merged
+        for name, d in targets:
+            tmp = ws("tmp_eval_exp", name)
+
+            def mk(name=name, d=d, tmp=tmp):
+                def pre(emit):
+                    shutil.rmtree(tmp, ignore_errors=True)
+                    os.makedirs(tmp)
+                    shutil.copy2(_latest_ckpt_file(d), os.path.join(tmp, os.path.basename(_latest_ckpt_file(d))))
+                    emit(f"### ПРОВЕРКА {name}")
+                def post(emit):
+                    shutil.rmtree(tmp, ignore_errors=True)
+                return pre, post
+            pre, post = mk()
+            steps_l.append(("call", pre, "проверка " + name))
+            steps_l.append(([exe] + [str(x) for x in ["train", "--resume", "--ckpt-dir", tmp, "--steps", 1, "--lr", "1e-12", "--warmup", 1,
+                                                       "--batch", 1, "--accum", 1, "--ckpt-every", 0, "--eval-every", 0]], cwd))
+            steps_l.append(("call", post, "уборка"))
+
+        def summary(emit):
+            lines = list(holder["job"].lines)
+            res, cur, wait = [], None, False
+            for ln in lines:
+                m = re.match(r"^### ПРОВЕРКА (\S+)", ln)
+                if m:
+                    cur, wait = m.group(1), False
+                    continue
+                if cur and "валидация ДО фазы" in ln:
+                    wait = True
+                    continue
+                if cur and wait and key in ln:
+                    v = re.search(r"=\s*([\d.]+)\s*бит/байт", ln)
+                    if v:
+                        res.append((cur, float(v.group(1))))
+                        cur, wait = None, False
+            emit("══ ИТОГ: val на данных базы (" + key + "), бит/байт — меньше лучше ══")
+            b = dict(res).get("base")
+            for name, v in res:
+                emit(f"  {name:<16} {v:.3f}" + ("" if b is None or name == "base" else f"   ({v - b:+.3f} к базе)"))
+            br = [v for n, v in res if n.startswith("branch_")]
+            if br:
+                emit(f"  лучшая ветка: {min(br):.3f}, средняя: {sum(br) / len(br):.3f}")
+                for n, v in res:
+                    if n.startswith("merged_"):
+                        emit(f"  {n}: {'ЛУЧШЕ' if v < min(br) else 'хуже'} лучшей ветки на {abs(v - min(br)):.3f}")
+        steps_l.append(("call", summary, "итоговая таблица"))
+    job = Job("branches", f"Ветки ({len(shards)}) → слияние", steps_l, gpu=True)
+    holder["job"] = job
+    return job
+
+
+def action_syntax(p):
+    ck = path_arg(p, "ckpt", must_exist=True)
+    if not os.path.isfile(bin_path()):
+        raise ValueError("программа не собрана: нажмите «Собрать программу» на Панели")
+    if not shutil.which("rustfmt"):
+        raise ValueError("не найден rustfmt (rustup component add rustfmt)")
+    g = gpu_info()
+    if g and g["total"] and g["total"] - (g["used"] or 0) < 1200:
+        raise RuntimeError(f"мало свободной видеопамяти ({g['total'] - g['used']:.0f} МБ): остановите обучение или подождите")
+    a = ["--ckpt", ck, "--n", num(p, "n", int, 40, 1, 400), "--len", num(p, "len", int, 400, 50, 4000), "--bin", bin_path()]
+    return Job("syntax", "Метрика: синтаксис Rust", py_tool("eval_syntax.py", a), gpu=True)
+
+
 ACTIONS = {"train": action_train, "gen": action_gen, "merge": action_merge, "eval": action_eval, "info": action_info,
-           "build": action_build, "split": action_split, "sample": action_sample, "mix": action_mix, "starcoder": action_starcoder}
+           "build": action_build, "split": action_split, "sample": action_sample, "mix": action_mix, "starcoder": action_starcoder, "shards": action_shards, "branches": action_branches, "syntax": action_syntax}
 
 
 def run_action(name, params):
     fn = ACTIONS.get(name)
     if not fn:
         raise ValueError("неизвестное действие")
-    if name == "train" and running_jobs("train"):
-        raise RuntimeError(f"уже идёт обучение (задача №{running_jobs('train')[0].id}); остановите его кнопкой «Стоп» (чекпойнт сохранится)")
-    if name in ("eval", "gen") and running_jobs(name):
+    if name in ("train", "branches") and (running_jobs("train") or running_jobs("branches")):
+        j0 = (running_jobs("train") + running_jobs("branches"))[0]
+        raise RuntimeError(f"уже идёт обучение (задача №{j0.id}); остановите его кнопкой «Стоп» (чекпойнт сохранится)")
+    if name in ("eval", "gen", "syntax") and running_jobs(name):
         raise RuntimeError("такая задача уже выполняется")
     if name == "build" and running_jobs("build"):
         raise RuntimeError("сборка уже идёт")
@@ -668,6 +829,7 @@ def main():
     load_conf()
     for sub in ("data", "checkpoints", "logs"):
         os.makedirs(ws(sub), exist_ok=True)
+    init_job_seq()
     srv = None
     for port in range(a.port, a.port + 20):
         try:

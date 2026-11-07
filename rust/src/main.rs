@@ -635,7 +635,8 @@ fn help() {
   --no-quant         fp32 без квантизации (контрольный эксперимент)
 
 СЛИЯНИЕ МОДЕЛЕЙ (на процессоре, видеокарта не нужна)
-  hashnet_proto merge --method avg|slerp|task|ties|dare|stack --model A --model B [--model C ...] [--base B0] --out ПАПКА
+  hashnet_proto merge --method avg|slerp|task|ties|dare|stack|grow --model A --model B [--model C ...] [--base B0] --out ПАПКА
+  hashnet_proto merge --method grow --model A --add-layers N [--place end|spread] [--init ident|copy] [--eps 0] --out ПАПКА   (рост в глубину одной модели)
     avg    среднее (--alpha 0.5,0.5)      slerp  сфера между двумя (--t 0.5)
     task   base+Σα(W−base) (--alpha)      ties   (--density 0.2 --lambda 1.0)     dare  (--drop 0.3 --alpha)
     stack  слои A, затем слои B: размер растёт (--take 0-6,0-6  --globals first|last|avg)
@@ -677,6 +678,10 @@ fn cmd_merge(a: &Args) -> Res<()> {
         globals: a.s("globals", "first"),
         out: a.s("out", "ckpt_merged"),
         seed: a.get("seed", 1234u64)?,
+        add_layers: a.get("add-layers", 0usize)?,
+        place: a.s("place", "end"),
+        init: a.s("init", "ident"),
+        eps: a.get("eps", 0.0f32)?,
     };
     merge::run(&o)
 }
