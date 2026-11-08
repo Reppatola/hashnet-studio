@@ -34,9 +34,29 @@ pub struct Config {
     pub n_layers: usize,
     pub n_heads: usize,
     pub seq_len: usize,
+    /// число корзин в каждой из двух хэш-таблиц n-грамм (3 и 5 последних байт); 0 = выключено
+    pub ngram: usize,
+}
+
+/// Хэш n последних байт окна (позиция p внутри окна; байты до начала окна считаются нулями).
+/// ОБЯЗАНА совпадать с ng_hash в kernels.cu.
+pub fn ng_hash(w: &[u8], p: usize, n: usize, buckets: usize) -> usize {
+    let mut h: u32 = 2166136261;
+    for i in 0..n {
+        let b: u32 = if p >= i { w[p - i] as u32 } else { 0 };
+        h = (h ^ b).wrapping_mul(16777619);
+    }
+    h ^= h >> 15;
+    h = h.wrapping_mul(2246822519);
+    h ^= h >> 13;
+    (h % buckets as u32) as usize
 }
 
 impl Config {
+    /// индекс первой таблицы n-грамм (3-граммы); 5-граммы — следующий тензор
+    pub fn ng_base(&self) -> usize {
+        BASE + self.n_layers * TPL
+    }
     pub fn d_head(&self) -> usize {
         self.d_model / self.n_heads
     }
@@ -44,7 +64,7 @@ impl Config {
         4 * self.d_model
     }
     pub fn n_tensors(&self) -> usize {
-        BASE + self.n_layers * TPL
+        BASE + self.n_layers * TPL + if self.ngram > 0 { 2 } else { 0 }
     }
     pub fn validate(&self) -> Res<()> {
         if self.n_heads == 0 || self.d_model == 0 || self.d_model % self.n_heads != 0 {
@@ -59,6 +79,9 @@ impl Config {
         Ok(())
     }
     pub fn kind(&self, i: usize) -> Kind {
+        if self.ngram > 0 && i >= self.ng_base() {
+            return Kind::Emb;
+        }
         match i {
             0 => Kind::Emb,
             1 => Kind::Pos,
@@ -76,6 +99,9 @@ impl Config {
     pub fn shape(&self, i: usize) -> (usize, usize) {
         let d = self.d_model;
         let ff = self.d_ff();
+        if self.ngram > 0 && i >= self.ng_base() {
+            return (self.ngram, d);
+        }
         match i {
             0 => (VOCAB, d),
             1 => (self.seq_len, d),
@@ -148,6 +174,8 @@ pub struct Hyper {
     pub eps: f32,
     pub wd: f32,
     pub clip: f32,
+    /// множитель lr для таблиц n-грамм (1.0 = как у остальных)
+    pub ng_lr: f32,
 }
 
 /// Хост-копия состояния Adam (нужна только для чекпойнтов; шаг считается на GPU в `Trainer`)
@@ -393,6 +421,10 @@ impl Trainer {
         let sh = ((t * d) as i64, dh as i64); // шаги по (batch, head) для [b*t, d] с головами по столбцам
 
         gpu.embed_fwd(&p[0], &p[1], tok, &mut xs[0], n, t, d)?;
+        if cfg.ngram > 0 {
+            let ng = cfg.ng_base();
+            gpu.ngram_fwd(&p[ng], &p[ng + 1], tok, &mut xs[0], n, t, d, cfg.ngram)?;
+        }
         for l in 0..cfg.n_layers {
             let o = BASE + l * TPL;
             let lc = &mut layers[l];
@@ -481,6 +513,11 @@ impl Trainer {
         }
         let (ge, gp) = two_mut(g.as_mut_slice(), 0, 1);
         gpu.embed_bwd(dx, tok, ge, gp, n, t, d)?;
+        if cfg.ngram > 0 {
+            let ng = cfg.ng_base();
+            let (g3, g5) = two_mut(g.as_mut_slice(), ng, ng + 1);
+            gpu.ngram_bwd(dx, tok, g3, g5, n, t, d, cfg.ngram)?;
+        }
         Ok(())
     }
 
@@ -525,7 +562,8 @@ impl Trainer {
         for i in 0..self.g.len() {
             let decay = if self.cfg.kind(i) == Kind::Mat { hp.wd } else { 0.0 };
             let n = self.p[i].len();
-            gpu.adam(&mut self.p[i], &self.g[i], &mut self.m[i], &mut self.v[i], n, hp.lr, hp.b1, hp.b2, hp.eps, decay, coef, bc1, bc2)?;
+            let lr_i = if self.cfg.ngram > 0 && i >= self.cfg.ng_base() { hp.lr * hp.ng_lr } else { hp.lr };
+            gpu.adam(&mut self.p[i], &self.g[i], &mut self.m[i], &mut self.v[i], n, lr_i, hp.b1, hp.b2, hp.eps, decay, coef, bc1, bc2)?;
         }
         Ok((norm, nll, true))
     }
@@ -594,4 +632,42 @@ impl Trainer {
         self.p[i] = gpu.upload(vals)?;
         Ok(())
     }
+}
+
+#[cfg(test)]
+mod ngram_tests {
+    use super::*;
+    #[test]
+    fn config_tensors_with_ngram() {
+        let c = Config { d_model: 16, n_layers: 2, n_heads: 2, seq_len: 8, ngram: 32 };
+        assert_eq!(c.n_tensors(), BASE + 2 * TPL + 2);
+        assert_eq!(c.shape(c.ng_base()), (32, 16));
+        assert_eq!(c.shape(c.ng_base() + 1), (32, 16));
+        assert_eq!(c.kind(c.ng_base() + 1), Kind::Emb);
+        let c0 = Config { ngram: 0, ..c.clone() };
+        assert_eq!(c0.n_tensors(), BASE + 2 * TPL);
+        assert_eq!(c.n_params() - c0.n_params(), 2 * 32 * 16);
+        let m = Model::new(c.clone(), 1);
+        assert_eq!(m.t.len(), c.n_tensors());
+    }
+    #[test]
+    fn hash_in_range_and_window_start() {
+        let w = b"fn main() { let x = 5; }";
+        for p in 0..w.len() {
+            for n in [3, 5] {
+                assert!(ng_hash(w, p, n, 4096) < 4096);
+            }
+        }
+        // за началом окна байты нулевые: результат не зависит от того, что лежит «до» окна
+        let a = ng_hash(&[7, 8, 9], 0, 5, 1000);
+        let b = ng_hash(&[7, 1, 1], 0, 5, 1000);
+        assert_eq!(a, b);
+        // разный контекст — (почти всегда) разные корзины
+        assert_ne!(ng_hash(b"abcde", 4, 5, 1 << 20), ng_hash(b"abcdf", 4, 5, 1 << 20));
+        // эталонные значения для сверки с CUDA-реализацией (tools/ng_hash_ref.c)
+        assert_eq!(ng_hash(b"abcde", 4, 3, 4096), NG_REF3);
+        assert_eq!(ng_hash(b"abcde", 4, 5, 4096), NG_REF5);
+    }
+    const NG_REF3: usize = 2292;
+    const NG_REF5: usize = 575;
 }

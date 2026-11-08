@@ -118,6 +118,42 @@ extern "C" __global__ void embed_bwd(const float* dx, const unsigned char* tok,
     }
 }
 
+// ───────────── хэш-эмбеддинги n-грамм (3 и 5 последних байт окна) ─────────────
+// ОБЯЗАНА совпадать с model::ng_hash (Rust)
+__device__ __forceinline__ int ng_hash(const unsigned char* tok, int r, int p, int n, int buckets)
+{
+    unsigned int h = 2166136261u;
+    for (int i = 0; i < n; i++) {
+        unsigned int b = (p >= i) ? (unsigned int)tok[r - i] : 0u;
+        h = (h ^ b) * 16777619u;
+    }
+    h ^= h >> 15;
+    h *= 2246822519u;
+    h ^= h >> 13;
+    return (int)(h % (unsigned int)buckets);
+}
+
+extern "C" __global__ void ngram_fwd(const float* h3, const float* h5, const unsigned char* tok,
+                                     float* x, int t, int d, int buckets)
+{
+    int r = blockIdx.x, p = r % t;
+    int i3 = ng_hash(tok, r, p, 3, buckets), i5 = ng_hash(tok, r, p, 5, buckets);
+    for (int j = threadIdx.x; j < d; j += blockDim.x)
+        x[(long long)r * d + j] += h3[(long long)i3 * d + j] + h5[(long long)i5 * d + j];
+}
+
+extern "C" __global__ void ngram_bwd(const float* dx, const unsigned char* tok,
+                                     float* g3, float* g5, int t, int d, int buckets)
+{
+    int r = blockIdx.x, p = r % t;
+    int i3 = ng_hash(tok, r, p, 3, buckets), i5 = ng_hash(tok, r, p, 5, buckets);
+    for (int j = threadIdx.x; j < d; j += blockDim.x) {
+        float v = dx[(long long)r * d + j];
+        atomicAdd(&g3[(long long)i3 * d + j], v);
+        atomicAdd(&g5[(long long)i5 * d + j], v);
+    }
+}
+
 // ───────────── LayerNorm ─────────────
 extern "C" __global__ void ln_fwd(const float* x, const float* g, const float* b,
                                   float* out, float* xn, float* stds, int d)

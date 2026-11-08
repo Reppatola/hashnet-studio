@@ -209,9 +209,16 @@ fn cmd_train(a: &Args) -> Res<()> {
             n_layers: a.get("layers", 4)?,
             n_heads: a.get("heads", 4)?,
             seq_len: a.get("seq", 64)?,
+            ngram: a.get("hash-ngrams", 0usize)?,
         };
         cfg.validate()?;
-        let model = Model::new(cfg.clone(), seed);
+        let mut model = Model::new(cfg.clone(), seed);
+        if cfg.ngram > 0 && a.s("ngram-init", "normal") == "zero" {
+            for i in cfg.ng_base()..cfg.n_tensors() {
+                model.t[i].iter_mut().for_each(|x| *x = 0.0);
+            }
+            println!("  таблицы n-грамм: нулевая инициализация");
+        }
         let adam = Adam::new(&model);
         let meta = Meta {
             cfg,
@@ -236,7 +243,7 @@ fn cmd_train(a: &Args) -> Res<()> {
         println!("  ⚠ --no-quant: fp32-режим (без тернаризации весов и квантизации активаций) — контрольный эксперимент");
     }
     // буфер активаций на GPU рассчитан на batch (но не меньше 8 — для валидации)
-    let mut tr = Trainer::new(&gpu, &model, &adam, batch, quant)?;
+    let mut tr = Trainer::new(&gpu, &model, &adam, batch.max(8), quant)?;
 
     // ── план фазы обучения ──
     // --data путь  или  --data путь@доля  (доли относительные: файл.txt@0.4 другой.txt@0.2 ...)
@@ -282,7 +289,12 @@ fn cmd_train(a: &Args) -> Res<()> {
     }
 
     let mixer = Mixer::new(&meta.segs, win)?;
-    let vals: Vec<Vec<Vec<u8>>> = meta.segs.iter().map(|s| data::val_windows(s, win, 64)).collect::<Res<Vec<_>>>()?;
+    // число окон валидации: по умолчанию 64 (≈32 КБ, быстро, но грубо); для точных сравнений --val-windows 1024
+    let val_windows: usize = a.get("val-windows", 64usize)?;
+    if val_windows < 1 {
+        return Err("--val-windows должно быть >= 1".into());
+    }
+    let vals: Vec<Vec<Vec<u8>>> = meta.segs.iter().map(|s| data::val_windows(s, win, val_windows)).collect::<Res<Vec<_>>>()?;
 
     println!("══════════════════════════════════════════════════════════════");
     println!(
@@ -294,7 +306,7 @@ fn cmd_train(a: &Args) -> Res<()> {
     let base = eval_all(&mut tr, &gpu, &vals)?;
     print_eval("валидация ДО фазы", &meta.segs, &base, None);
 
-    let mut hp = Hyper { lr: meta.phase_lr, b1: 0.9, b2: 0.95, eps: 1e-8, wd: a.get("wd", 0.01)?, clip: a.get("clip", 1.0)? };
+    let mut hp = Hyper { lr: meta.phase_lr, b1: 0.9, b2: 0.95, eps: 1e-8, wd: a.get("wd", 0.01)?, clip: a.get("clip", 1.0)?, ng_lr: a.get("ngram-lr-mult", 1.0f32)? };
     let end_step = meta.phase_start + meta.phase_steps;
     let mut rng = Rng(meta.rng);
     let mut buf: Vec<u8> = Vec::new();
@@ -412,7 +424,7 @@ fn cmd_train(a: &Args) -> Res<()> {
 /// Запуск: hashnet_proto check
 fn cmd_check(_a: &Args) -> Res<()> {
     let gpu = gpu::GpuBitwise::new()?;
-    let cfg = Config { d_model: 32, n_layers: 2, n_heads: 2, seq_len: 12 };
+    let cfg = Config { d_model: 32, n_layers: 2, n_heads: 2, seq_len: 12, ngram: 64 };
     cfg.validate()?;
     let mut model = Model::new(cfg.clone(), 5);
     let mut rng = Rng::new(99);

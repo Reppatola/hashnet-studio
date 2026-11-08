@@ -108,9 +108,12 @@ pub fn save(dir: &str, meta: &Meta, model: &Model, adam: &Adam, keep: usize) -> 
         let f = File::create(&tmp)?;
         let mut w = BufWriter::with_capacity(1 << 20, f);
         w.write_all(MAGIC)?;
-        wu32(&mut w, 1)?;
+        wu32(&mut w, if meta.cfg.ngram > 0 { 2 } else { 1 })?;
         for v in [meta.cfg.d_model, meta.cfg.n_layers, meta.cfg.n_heads, meta.cfg.seq_len] {
             wu64(&mut w, v as u64)?;
+        }
+        if meta.cfg.ngram > 0 {
+            wu64(&mut w, meta.cfg.ngram as u64)?;
         }
         wu64(&mut w, meta.step)?;
         wu32(&mut w, meta.phase)?;
@@ -173,7 +176,7 @@ pub fn load(path: &Path) -> Res<(Meta, Model, Adam)> {
         return Err("это не чекпойнт HashNet4D (неверная сигнатура)".into());
     }
     let ver = ru32(&mut r)?;
-    if ver != 1 {
+    if ver != 1 && ver != 2 {
         return Err(format!("неподдерживаемая версия чекпойнта {}", ver).into());
     }
     let cfg = Config {
@@ -181,6 +184,7 @@ pub fn load(path: &Path) -> Res<(Meta, Model, Adam)> {
         n_layers: ru64(&mut r)? as usize,
         n_heads: ru64(&mut r)? as usize,
         seq_len: ru64(&mut r)? as usize,
+        ngram: if ver >= 2 { ru64(&mut r)? as usize } else { 0 },
     };
     cfg.validate()?;
     let step = ru64(&mut r)?;

@@ -94,9 +94,9 @@ impl GpuBitwise {
         let stream = ctx.default_stream();
         let ptx = compile_ptx(KERNELS)?;
         let module = ctx.load_module(ptx)?;
-        let names: [&'static str; 19] = [
+        let names: [&'static str; 21] = [
             "sgemm", "embed_fwd", "embed_bwd", "ln_fwd", "ln_bwd", "colsum2", "aq", "copyk", "addk", "zerok",
-            "gelu_fwd", "gelu_bwd", "softmax_fwd", "softmax_bwd", "loss_k", "absum", "ternarize", "sumsq", "adam",
+            "gelu_fwd", "gelu_bwd", "softmax_fwd", "softmax_bwd", "loss_k", "absum", "ternarize", "sumsq", "adam", "ngram_fwd", "ngram_bwd",
         ];
         let mut kernels = HashMap::new();
         for n in names {
@@ -154,6 +154,16 @@ impl GpuBitwise {
     pub fn embed_bwd(&self, dx: &CudaSlice<f32>, tok: &CudaSlice<u8>, g_emb: &mut CudaSlice<f32>, g_pos: &mut CudaSlice<f32>, n: usize, t: usize, d: usize) -> R {
         let (t, d) = (t as i32, d as i32);
         launch!(self, "embed_bwd", crows(n), dx, tok, g_emb, g_pos, &t, &d);
+        Ok(())
+    }
+    pub fn ngram_fwd(&self, h3: &CudaSlice<f32>, h5: &CudaSlice<f32>, tok: &CudaSlice<u8>, x: &mut CudaSlice<f32>, n: usize, t: usize, d: usize, buckets: usize) -> R {
+        let (t, d, bk) = (t as i32, d as i32, buckets as i32);
+        launch!(self, "ngram_fwd", crows(n), h3, h5, tok, x, &t, &d, &bk);
+        Ok(())
+    }
+    pub fn ngram_bwd(&self, dx: &CudaSlice<f32>, tok: &CudaSlice<u8>, g3: &mut CudaSlice<f32>, g5: &mut CudaSlice<f32>, n: usize, t: usize, d: usize, buckets: usize) -> R {
+        let (t, d, bk) = (t as i32, d as i32, buckets as i32);
+        launch!(self, "ngram_bwd", crows(n), dx, tok, g3, g5, &t, &d, &bk);
         Ok(())
     }
     pub fn ln_fwd(&self, x: &CudaSlice<f32>, g: &CudaSlice<f32>, b: &CudaSlice<f32>, out: &mut CudaSlice<f32>, xn: &mut CudaSlice<f32>, stds: &mut CudaSlice<f32>, rows: usize, d: usize) -> R {

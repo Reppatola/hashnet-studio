@@ -90,7 +90,7 @@ canvas{width:100%;height:160px;background:var(--bg);border:1px solid var(--bd);b
   <div class="row"><button class="b" id="mNew">Новая модель</button><button class="b s" id="mRes">Продолжить / дообучить</button></div>
   <div id="newBox">
    <label>Размер модели (пресет)</label><select id="preset"></select>
-   <div class="row"><div><label>d_model</label><input id="tr_d" type="number" value="512"></div><div><label>Слоёв</label><input id="tr_L" type="number" value="8"></div><div><label>Голов</label><input id="tr_h" type="number" value="8"></div><div><label>Контекст (seq)</label><input id="tr_seq" type="number" value="256"></div></div>
+   <div class="row"><div><label>d_model</label><input id="tr_d" type="number" value="512"></div><div><label>Слоёв</label><input id="tr_L" type="number" value="8"></div><div><label>Голов</label><input id="tr_h" type="number" value="8"></div><div><label>Контекст (seq)</label><input id="tr_seq" type="number" value="256"></div><div><label>Хэш n-грамм: корзин (0 — выкл.)</label><input id="tr_ng" type="number" value="0"></div><div><label>n-граммы: инициализация</label><select id="tr_ngi"><option value="normal">случайная</option><option value="zero">нулевая</option></select></div><div><label>n-граммы: множитель lr</label><input id="tr_ngm" value="1"></div></div>
    <div class="hint" id="parEst"></div>
    <label>Папка модели (чекпойнты)</label><div class="row"><input id="tr_dir"><button class="b s nf" data-pick="dir:tr_dir">Выбрать…</button></div>
   </div>
@@ -100,10 +100,14 @@ canvas{width:100%;height:160px;background:var(--bg);border:1px solid var(--bd);b
   <h3>Данные</h3><div id="trdata"></div><button class="b s" data-add="tr">+ Добавить файл</button>
   <h3>Параметры</h3>
   <div class="row"><div><label>Шагов (steps)</label><input id="tr_steps" type="number" value="20000"></div><div><label>Batch</label><input id="tr_batch" type="number" value="8"></div><div><label>Accum</label><input id="tr_accum" type="number" value="1"></div><div><label>LR</label><input id="tr_lr" value="3e-3"></div></div>
-  <div class="row"><div><label>Warmup</label><input id="tr_wu" type="number" value="200"></div><div><label>Replay-frac (повтор старого)</label><input id="tr_rp" value=""></div><div><label>Чекпойнт каждые N шагов</label><input id="tr_ce" type="number" value="500"></div><div><label>Val каждые N шагов</label><input id="tr_ev" type="number" value="500"></div></div>
+  <div class="row"><div><label>Warmup</label><input id="tr_wu" type="number" value="200"></div><div><label>Replay-frac (повтор старого)</label><input id="tr_rp" value=""></div><div><label>Чекпойнт каждые N шагов</label><input id="tr_ce" type="number" value="500"></div><div><label>Val каждые N шагов</label><input id="tr_ev" type="number" value="500"></div><div><label>Окон val (64 — быстро/грубо; 1024 — точно)</label><input id="tr_vw" type="number" value="64"></div><div><label>Seed (пусто — по умолчанию)</label><input id="tr_seed" type="number" value=""></div></div>
   <div class="hint">Токенов за шаг = batch × seq × accum. При нехватке видеопамяти уменьшайте batch и увеличивайте accum.</div>
   <div style="margin-top:10px" class="row"><button class="b" id="bTrain">▶ Старт</button><button class="b d" id="bStop" disabled>■ Стоп (с сохранением)</button></div>
   <pre class="cmd" id="trcmd" style="display:none"></pre></div>
+ <div class="card"><h2>Проверка val (без изменения модели)</h2>
+  <p class="hint">Считает val на копии чекпойнта — модель в папке не меняется. Для сравнения моделей берите одно и то же число окон (1024 — точно, 64 — быстро и грубо).</p>
+  <div class="row"><div><label>Модель</label><select id="ev_model"></select></div><div class="nf" style="min-width:140px"><label>Окон val</label><input id="ev_vw" type="number" value="1024"></div><button class="b nf" id="bEval" style="margin-top:20px">Проверить</button></div>
+  <pre class="log" id="evlog" style="height:180px"></pre></div>
  <div class="card"><h2>Ход обучения</h2><div class="bar"><i id="pbar" style="width:0"></i></div>
   <div class="stats" id="tstats"></div><canvas id="chart" width="1000" height="160"></canvas>
   <pre class="log" id="trlog"></pre></div>
@@ -257,10 +261,11 @@ function drawRes(){if(!ST)return;const c=ST.ckpts;if(!resSel&&c.length){resSel=(
  $('resList').innerHTML=c.length?'<table>'+c.map(x=>`<tr class="clk${x.dir===resSel?' sel':''}" data-rs="${esc(x.dir)}"><td><b>${esc(x.name)}</b></td><td>${fmtP(x.meta.params)}</td><td>шаг ${x.meta.step}${x.meta.phase_steps?' / '+(x.meta.phase_start+x.meta.phase_steps):''}</td><td>${x.meta.phase_done?'<span class="tag done">завершена</span>':'<span class="tag stopped">прервана</span>'}</td></tr>`).join('')+'</table>':'<div class="hint">нет моделей</div>'}
 function applyRes(){const c=ST.ckpts.find(x=>x.dir===resSel);if(c&&!c.meta.phase_done&&c.meta.phase_steps){$('tr_steps').value=c.meta.phase_steps;if(c.meta.phase_lr)$('tr_lr').value=+c.meta.phase_lr.toPrecision(3)}}
 document.addEventListener('click',e=>{const r=e.target.closest('[data-rs]');if(!r)return;resSel=r.dataset.rs;applyRes();drawRes()});
-$('bTrain').onclick=async()=>{const p={steps:$('tr_steps').value,batch:$('tr_batch').value,accum:$('tr_accum').value,lr:$('tr_lr').value,warmup:$('tr_wu').value,replay_frac:$('tr_rp').value,ckpt_every:$('tr_ce').value,eval_every:$('tr_ev').value,data:LISTS.tr.rows.filter(r=>r.path)};
- if(mode==='new'){Object.assign(p,{ckpt_dir:$('tr_dir').value,d_model:$('tr_d').value,layers:$('tr_L').value,heads:$('tr_h').value,seq:$('tr_seq').value})}
+$('bTrain').onclick=async()=>{const p={steps:$('tr_steps').value,batch:$('tr_batch').value,accum:$('tr_accum').value,lr:$('tr_lr').value,warmup:$('tr_wu').value,replay_frac:$('tr_rp').value,ckpt_every:$('tr_ce').value,eval_every:$('tr_ev').value,val_windows:$('tr_vw').value,ngram_lr_mult:$('tr_ngm').value,seed:$('tr_seed').value,data:LISTS.tr.rows.filter(r=>r.path)};
+ if(mode==='new'){Object.assign(p,{ckpt_dir:$('tr_dir').value,d_model:$('tr_d').value,layers:$('tr_L').value,heads:$('tr_h').value,seq:$('tr_seq').value,hash_ngrams:$('tr_ng').value,ngram_init:$('tr_ngi').value})}
  else{if(!resSel)return toast('Выберите модель',1);Object.assign(p,{ckpt_dir:resSel,resume:true,new_phase:$('tr_np').checked})}
  tdata={};const r=await run('train',p,'train');if(r){$('trlog').textContent='';trFrom=0;trLines=[];pts=[];$('trcmd').style.display='';$('trcmd').textContent='Эквивалент в терминале:\n'+r.cmd}};
+$('bEval').onclick=async()=>{const d=$('ev_model').value;if(!d)return toast('Выберите модель',1);const r=await run('eval',{ckpt:d,val_windows:$('ev_vw').value},'evl');if(r){evFrom=0;$('evlog').textContent=''}};
 $('bStop').onclick=async()=>{const id=$('bStop').dataset.id;if(!id)return;try{await api('/api/stop',{id:+id});toast('Останавливаю — подождите сохранения чекпойнта…')}catch(e){toast(e.message,1)}};
 
 // ── Слияние
@@ -281,6 +286,7 @@ function drawCkSelectors(){if(!ST)return;const c=ST.ckpts;if(!chatCk&&c.length)c
  $('chatCk').innerHTML=c.length?`<select id="chsel">${c.map(x=>`<option value="${esc(x.dir)}" ${x.dir===chatCk?'selected':''}>${esc(x.name)} — ${fmtP(x.meta.params)}, шаг ${x.meta.step}</option>`).join('')}</select>`:'<div class="hint">нет моделей</div>';
  if($('chsel'))$('chsel').onchange=e=>chatCk=e.target.value;
  // списки моделей для слияния — быстрый выбор
+ const ce=$('ev_model').value;$('ev_model').innerHTML=c.map(x=>`<option value="${esc(x.dir)}">${esc(x.name)} — ${fmtP(x.meta.params)}, шаг ${x.meta.step}</option>`).join('');if(ce&&[...$('ev_model').options].some(o=>o.value===ce))$('ev_model').value=ce;
  const cur=$('br_base').value;$('br_base').innerHTML=c.map(x=>`<option value="${esc(x.dir)}">${esc(x.name)} — ${fmtP(x.meta.params)}, шаг ${x.meta.step}</option>`).join('');if(cur&&[...$('br_base').options].some(o=>o.value===cur))$('br_base').value=cur;}
 function drawChat(){$('chat').innerHTML=hist.map(m=>`<div class="m ${m.r}">${esc(m.t)}</div>`).join('');$('chat').scrollTop=1e9}drawChat();
 function extract(lines){let s=lines.findIndex(l=>/инференс/.test(l));let e=lines.findIndex((l,i)=>i>s&&/\[\d+\s*байт/.test(l));if(s<0)s=-1;return lines.slice(s+1,e<0?undefined:e).join('\n')}
@@ -293,7 +299,7 @@ $('bSyn').onclick=async()=>{if(!chatCk)return toast('Выберите модел
 $('bClr').onclick=()=>{hist=[];SV('chat',[]);drawChat()};
 
 // ── Логи, прогресс
-let synFrom=0,logSel=null,logFrom=0,trFrom=0,mgFrom=0,trLines=[],pts=[],tdata={},dFrom={};
+let evFrom=0,synFrom=0,logSel=null,logFrom=0,trFrom=0,mgFrom=0,trLines=[],pts=[],tdata={},dFrom={};
 function drawChart(){const c=$('chart'),x=c.getContext('2d');x.clearRect(0,0,c.width,c.height);if(pts.length<4)return;
  const cs=getComputedStyle(document.body);const skip=Math.min(Math.floor(pts.length*0.04),pts.length-3);const base=pts.slice(skip);
  const W=Math.max(3,Math.floor(base.length/60));const sm=base.map((p,i)=>{let s=0,n=0;for(let k=Math.max(0,i-W);k<=i;k++){s+=base[k][1];n++}return[p[0],s/n]});
@@ -316,6 +322,7 @@ async function tick(){if(busy)return;busy=true;
   if(tid){const j=await jobGet('train',tid,trFrom);if(j){if(j.lines.length||trFrom===0){parseTrain(j.lines);const el=$('trlog');const atEnd=el.scrollTop+el.clientHeight>el.scrollHeight-30;el.textContent=(trFrom?el.textContent.replace(/\n⟳.*$/,'')+'\n':'')+j.lines.join('\n')+(j.live?'\n⟳ '+j.live:'');if(atEnd)el.scrollTop=1e9;trFrom=j.next;if(j.live)parseTrain([j.live])}else if(j.live){const el=$('trlog');el.textContent=el.textContent.replace(/\n⟳.*$/,'')+'\n⟳ '+j.live}
    drawTrain(j.status==='running');if(!followers.train)followers.train=tid;if(j.cmd&&$('trcmd').style.display==='none'){$('trcmd').style.display='';$('trcmd').textContent='Эквивалент в терминале:\n'+j.cmd}}}}catch(e){}
  try{const mid=followers.merge||J('follow:merge');if(mid){const j=await jobGet('merge',mid,mgFrom);if(j&&j.lines.length){$('mglog').textContent+=j.lines.join('\n')+'\n';mgFrom=j.next;$('mglog').scrollTop=1e9}}}catch(e){}
+ try{const eid=followers.evl||J('follow:evl');if(eid){const j=await jobGet('evl',eid,evFrom);if(j&&(j.lines.length||j.live)){const el=$('evlog');el.textContent=el.textContent.replace(/\n⟳.*$/,'')+(j.lines.length?(el.textContent?'\n':'')+j.lines.join('\n'):'')+(j.live?'\n⟳ '+j.live:'');evFrom=j.next;el.scrollTop=1e9}}}catch(e){}
  try{const yid=followers.syn||J('follow:syn');if(yid){const j=await jobGet('syn',yid,synFrom);if(j&&(j.lines.length||j.live)){const el=$('synlog');el.textContent=el.textContent.replace(/\n⟳.*$/,'')+(j.lines.length?(el.textContent?'\n':'')+j.lines.join('\n'):'')+(j.live?'\n⟳ '+j.live:'');synFrom=j.next;el.scrollTop=1e9}}}catch(e){}
  try{const did=followers.data||J('follow:data');if(did){const f=dFrom[did]||0;const j=await jobGet('data',did,f);if(j){dFrom[did]=j.next;let h=$('dlog').dataset.id==did?$('dlog').dataset.txt||'':'';h+=j.lines.join('\n')+(j.lines.length?'\n':'');$('dlog').dataset.id=did;$('dlog').dataset.txt=h;
   $('dlog').innerHTML=`<div>${jobBadge(j)} ${esc(j.title)} <span class="mut">№${j.id}</span></div><pre class="log" style="height:300px">${esc(h.split('\n').slice(-400).join('\n'))}${j.live?'\n'+esc(j.live):''}</pre>`;
