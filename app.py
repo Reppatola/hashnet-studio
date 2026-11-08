@@ -403,6 +403,9 @@ def action_gen(p):
     nr = num(p, "no_repeat", int, 0, 0, 512)
     if nr:
         a += ["--no-repeat", nr]
+    ln = num(p, "loop_n", int, 0, 0, 512)
+    if ln:
+        a += ["--loop-n", ln]
     if p.get("verify"):
         a.append("--verify")
     if prompt:
@@ -664,6 +667,12 @@ def action_syntax(p):
     if g and g["total"] and g["total"] - (g["used"] or 0) < 1200:
         raise RuntimeError(f"мало свободной видеопамяти ({g['total'] - g['used']:.0f} МБ): остановите обучение или подождите")
     a = ["--ckpt", ck, "--n", num(p, "n", int, 40, 1, 400), "--len", num(p, "len", int, 400, 50, 4000), "--bin", bin_path()]
+    ln = num(p, "loop_n", int, 0, 0, 512)
+    if ln:
+        a += ["--loop-n", ln]
+    tp = num(p, "temp", float, None, 0.05, 3)
+    if tp is not None:
+        a += ["--temp", tp]
     return Job("syntax", "Метрика: синтаксис Rust", py_tool("eval_syntax.py", a), gpu=True)
 
 

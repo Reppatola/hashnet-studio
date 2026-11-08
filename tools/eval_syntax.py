@@ -86,6 +86,7 @@ def generate(a, prompt, i=0):
     cmd = [a.bin, "gen", "--ckpt", a.ckpt, "--len", str(a.len), "--temp", str(a.temp), "--top-k", str(a.top_k),
            "--seed", str(a.seed + i), "--prompt", prompt]
     if a.no_repeat: cmd += ["--no-repeat", str(a.no_repeat)]
+    if a.loop_n: cmd += ["--loop-n", str(a.loop_n), "--loop-k", str(a.loop_k)]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if r.returncode != 0: raise RuntimeError(r.stderr[-400:] or r.stdout[-400:])
     g = extract(r.stdout)
@@ -120,6 +121,8 @@ def main():
     ap.add_argument("--ckpt"); ap.add_argument("--n", type=int, default=40); ap.add_argument("--len", type=int, default=400)
     ap.add_argument("--temp", type=float, default=0.5); ap.add_argument("--top-k", type=int, default=20)
     ap.add_argument("--no-repeat", type=int, default=0, help="0 = выкл. Малые N (3-6) ЛОМАЮТ код: запрещают повторять любые 4 байта, а в коде имена повторяются постоянно")
+    ap.add_argument("--loop-n", type=int, default=0, help="защита от петель: окно N байт (напр. 24); 0 = выкл")
+    ap.add_argument("--loop-k", type=int, default=2, help="сколько повторов окна допускается до запрета")
     ap.add_argument("--seed", type=int, default=1000, help="у каждого образца свой seed (иначе повтор промпта даёт тот же текст)")
     ap.add_argument("--bin", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "rust", "target", "release", "hashnet_proto"))
     ap.add_argument("--prompts"); ap.add_argument("--show", type=int, default=3, help="сколько неудачных примеров показать")

@@ -143,13 +143,13 @@ canvas{width:100%;height:160px;background:var(--bg);border:1px solid var(--bd);b
  <div class="card"><h2>Чат с моделью</h2>
   <div class="hint warn" id="chatWarn"></div>
   <label>Модель</label><div id="chatCk"></div>
-  <div class="row"><div><label>Длина, байт</label><input id="c_len" type="number" value="300"></div><div><label>Temperature</label><input id="c_t" value="0.8"></div><div><label>Top-k</label><input id="c_k" type="number" value="40"></div><div><label>No-repeat N (0 — выкл.; малые N ломают код)</label><input id="c_nr" type="number" value="0"></div></div>
+  <div class="row"><div><label>Длина, байт</label><input id="c_len" type="number" value="300"></div><div><label>Temperature</label><input id="c_t" value="0.8"></div><div><label>Top-k</label><input id="c_k" type="number" value="40"></div><div><label>No-repeat N (0 — выкл.; малые N ломают код)</label><input id="c_nr" type="number" value="0"></div><div><label>Защита от петель: окно N (0 — выкл., напр. 24)</label><input id="c_ln" type="number" value="0"></div></div>
   <div id="chat"></div>
   <div class="row" style="margin-top:8px"><textarea id="c_in" rows="2" placeholder="Начало текста или кода… (модель продолжает, а не отвечает)"></textarea><button class="b nf" id="bGen">Отправить</button></div>
   <div class="row" style="margin-top:6px"><button class="b s nf" id="bClr">Очистить чат</button></div></div>
  <div class="card"><h2>Метрика кода: доля синтаксически корректного Rust</h2>
   <p class="hint">Модель продолжает N начал функций/структур; считается, сколько результатов закрылись скобками и разобрались парсером Rust (нужен rustfmt). Бит/байт этого не показывает. Для сравнения моделей запускайте с одинаковыми N и длиной. При N=40 разброс ±14 п.п. (95% ИС), поэтому для сравнений берите N≥200 (≈10 минут).</p>
-  <div class="row"><div><label>Фрагментов (N)</label><input id="sy_n" type="number" value="200"></div><div><label>Длина, байт</label><input id="sy_len" type="number" value="400"></div><button class="b nf" id="bSyn" style="margin-top:20px">Проверить выбранную модель</button></div>
+  <div class="row"><div><label>Фрагментов (N)</label><input id="sy_n" type="number" value="200"></div><div><label>Длина, байт</label><input id="sy_len" type="number" value="400"></div><div class="nf" style="min-width:150px"><label>Защита от петель: окно N (0 — выкл.)</label><input id="sy_ln" type="number" value="0"></div><div class="nf" style="min-width:110px"><label>Temperature</label><input id="sy_t" value="0.5"></div><button class="b nf" id="bSyn" style="margin-top:20px">Проверить выбранную модель</button></div>
   <pre class="log" id="synlog" style="height:200px"></pre></div>
 </section>
 
@@ -171,6 +171,35 @@ canvas{width:100%;height:160px;background:var(--bg);border:1px solid var(--bd);b
 <div class="row" style="justify-content:flex-end"><button class="b s nf" id="mcancel">Отмена</button><button class="b nf" id="mok">Выбрать эту папку</button></div></div></div>
 <div id="toast"></div>
 <script>
+/* Устойчивость интерфейса к частым обновлениям (опрос раз в секунду):
+   • innerHTML/textContent не перезаписываются, если содержимое не изменилось — выпадающие списки не закрываются, поля не сбрасываются;
+   • пока в логе выделен текст, запись откладывается и применяется после снятия выделения;
+   • автопрокрутка вниз только если пользователь и так был у конца лога. */
+(function(){
+ const tcD=Object.getOwnPropertyDescriptor(Node.prototype,'textContent');
+ const ihD=Object.getOwnPropertyDescriptor(Element.prototype,'innerHTML');
+ const stD=Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop');
+ const pending=new Set();
+ const selIn=el=>{try{const s=getSelection();return s&&!s.isCollapsed&&s.anchorNode&&el.contains(s.anchorNode)}catch(e){return false}};
+ Object.defineProperty(Element.prototype,'textContent',{configurable:true,
+  get(){return this._pend!==undefined?this._pend:tcD.get.call(this)},
+  set(v){v=String(v);
+   if(this.classList&&this.classList.contains('log')){
+    if(this._pend===undefined&&tcD.get.call(this)===v)return;
+    if(selIn(this)){this._pend=v;pending.add(this);return}
+    this._stick=(this.scrollHeight-this.scrollTop-this.clientHeight)<40;
+    this._pend=undefined;pending.delete(this);this._ih=undefined;tcD.set.call(this,v);return}
+   if(tcD.get.call(this)===v)return;this._ih=undefined;tcD.set.call(this,v)}});
+ Object.defineProperty(Element.prototype,'innerHTML',{configurable:true,
+  get(){return ihD.get.call(this)},
+  set(v){v=String(v);if(this._pendH===undefined&&this._ih===v)return;
+   if(selIn(this)){this._pendH=v;pending.add(this);return}
+   this._pendH=undefined;pending.delete(this);this._ih=v;ihD.set.call(this,v)}});
+ Object.defineProperty(Element.prototype,'scrollTop',{configurable:true,
+  get(){return stD.get.call(this)},
+  set(v){if(v>=1e8&&this._stick===false)return;stD.set.call(this,v)}});
+ document.addEventListener('selectionchange',()=>{if(!pending.size)return;for(const el of [...pending]){if(!selIn(el)){pending.delete(el);const v=el._pend,h=el._pendH;el._pend=undefined;el._pendH=undefined;if(v!==undefined){el._stick=(el.scrollHeight-el.scrollTop-el.clientHeight)<40;el._ih=undefined;tcD.set.call(el,v)}if(h!==undefined){el._ih=h;ihD.set.call(el,h)}}}});
+})();
 const $=id=>document.getElementById(id);
 const qs=new URLSearchParams(location.search);let TOKEN=qs.get('t');
 try{if(TOKEN)sessionStorage.setItem('tok',TOKEN);else TOKEN=sessionStorage.getItem('tok')}catch(e){}
@@ -291,11 +320,11 @@ function drawCkSelectors(){if(!ST)return;const c=ST.ckpts;if(!chatCk&&c.length)c
 function drawChat(){$('chat').innerHTML=hist.map(m=>`<div class="m ${m.r}">${esc(m.t)}</div>`).join('');$('chat').scrollTop=1e9}drawChat();
 function extract(lines){let s=lines.findIndex(l=>/инференс/.test(l));let e=lines.findIndex((l,i)=>i>s&&/\[\d+\s*байт/.test(l));if(s<0)s=-1;return lines.slice(s+1,e<0?undefined:e).join('\n')}
 $('bGen').onclick=async()=>{const pr=$('c_in').value;if(!chatCk)return toast('Выберите модель',1);hist.push({r:'u',t:pr||'(пусто)'});const ph={r:'a',t:'…'};hist.push(ph);drawChat();$('c_in').value='';
- try{const r=await api('/api/run',{action:'gen',params:{ckpt:chatCk,prompt:pr,len:$('c_len').value,temp:$('c_t').value,top_k:$('c_k').value,no_repeat:$('c_nr').value}});
+ try{const r=await api('/api/run',{action:'gen',params:{ckpt:chatCk,prompt:pr,len:$('c_len').value,temp:$('c_t').value,top_k:$('c_k').value,no_repeat:$('c_nr').value,loop_n:$('c_ln').value}});
   for(let k=0;k<3000;k++){await new Promise(z=>setTimeout(z,700));const j=await api('/api/job?id='+r.id);ph.t=(extract(j.lines)||(j.live||'…'));
    if(j.status!=='running'&&j.status!=='queued'){if(j.status==='failed')ph.t='ОШИБКА:\n'+j.lines.slice(-8).join('\n');else{ph.t=extract(j.lines)||pr}break}drawChat()}
  }catch(e){ph.t='ОШИБКА: '+e.message}SV('chat',hist.slice(-60));drawChat()};
-$('bSyn').onclick=async()=>{if(!chatCk)return toast('Выберите модель',1);const r=await run('syntax',{ckpt:chatCk,n:$('sy_n').value,len:$('sy_len').value},'syn');if(r){synFrom=0;$('synlog').textContent=''}};
+$('bSyn').onclick=async()=>{if(!chatCk)return toast('Выберите модель',1);const r=await run('syntax',{ckpt:chatCk,n:$('sy_n').value,len:$('sy_len').value,loop_n:$('sy_ln').value,temp:$('sy_t').value},'syn');if(r){synFrom=0;$('synlog').textContent=''}};
 $('bClr').onclick=()=>{hist=[];SV('chat',[]);drawChat()};
 
 // ── Логи, прогресс

@@ -493,9 +493,35 @@ fn cmd_check(_a: &Args) -> Res<()> {
 
 // ───────────────────────────── gen / info ─────────────────────────────
 
+/// Защита от петель: если последние `loop_n` байт уже встречались не менее `loop_k` раз раньше,
+/// возвращает набор байт, которые продолжали эти повторы (их надо запретить). None — вмешательство не нужно.
+fn loop_banned(ctx: &[u8], loop_n: usize, loop_k: usize) -> Option<[bool; VOCAB]> {
+    if loop_n < 4 || ctx.len() <= loop_n {
+        return None;
+    }
+    let key = &ctx[ctx.len() - loop_n..];
+    let mut banned = [false; VOCAB];
+    let (mut cnt, mut nb) = (0usize, 0usize);
+    for i in 0..ctx.len() - loop_n {
+        if &ctx[i..i + loop_n] == key {
+            cnt += 1;
+            let nx = ctx[i + loop_n] as usize;
+            if !banned[nx] {
+                banned[nx] = true;
+                nb += 1;
+            }
+        }
+    }
+    if cnt >= loop_k && nb > 0 && nb < VOCAB {
+        Some(banned)
+    } else {
+        None
+    }
+}
+
 /// Быстрая генерация: тернарные веса int8 + KV-кэш. При заполнении контекста (seq) окно
 /// сдвигается: кэш сбрасывается и пересчитывается по последней половине контекста.
-fn generate_fast(inf: &mut infer::Infer, prompt: &[u8], len: usize, temp: f32, top_k: usize, no_repeat: usize, rng: &mut Rng) -> Res<Vec<u8>> {
+fn generate_fast(inf: &mut infer::Infer, prompt: &[u8], len: usize, temp: f32, top_k: usize, no_repeat: usize, loop_n: usize, loop_k: usize, rng: &mut Rng) -> Res<Vec<u8>> {
     let seq = inf.seq;
     let mut ctx: Vec<u8> = if prompt.is_empty() { vec![b'\n'] } else { prompt.to_vec() };
     let refill = |inf: &mut infer::Infer, ctx: &[u8]| -> Res<Vec<f32>> {
@@ -525,6 +551,13 @@ fn generate_fast(inf: &mut infer::Infer, prompt: &[u8], len: usize, temp: f32, t
             if nb > 0 && nb < VOCAB {
                 for (i, &bn) in banned.iter().enumerate() {
                     if bn { logits[i] = -1e30; }
+                }
+            }
+        }
+        if let Some(banned) = loop_banned(&ctx, loop_n, loop_k) {
+            for (i, &bn) in banned.iter().enumerate() {
+                if bn {
+                    logits[i] = -1e30;
                 }
             }
         }
@@ -582,7 +615,9 @@ fn cmd_gen(a: &Args) -> Res<()> {
 
     let t0 = Instant::now();
     let no_repeat: usize = a.get("no-repeat", 0)?;
-    let out = generate_fast(&mut inf, prompt.as_bytes(), len, temp, top_k, no_repeat, &mut rng)?;
+    let loop_n: usize = a.get("loop-n", 0)?;
+    let loop_k: usize = a.get("loop-k", 2)?;
+    let out = generate_fast(&mut inf, prompt.as_bytes(), len, temp, top_k, no_repeat, loop_n, loop_k, &mut rng)?;
     let el = t0.elapsed().as_secs_f64();
     println!("{}{}", prompt, String::from_utf8_lossy(&out));
     eprintln!("\n[{} байт за {:.2}с = {:.0} байт/с]", out.len(), el, out.len() as f64 / el.max(1e-9));
@@ -647,7 +682,7 @@ fn help() {
     stack  слои A, затем слои B: размер растёт (--take 0-6,0-6  --globals first|last|avg)
   после stack модель нужно «подлечить» дообучением: train --resume --ckpt-dir ПАПКА --data ... --new-phase
 
-ПАРАМЕТРЫ gen:  --ckpt ckpt --prompt \"текст\" --len 200 --temp 0.8 --top-k 40\n  --no-repeat N  не повторять дословно куски из N байт (напр. 24; 0 = выкл)   --verify  сверить быстрый инференс с кодом обучения   --slow  медленный путь (окно целиком)"
+ПАРАМЕТРЫ gen:  --ckpt ckpt --prompt \"текст\" --len 200 --temp 0.8 --top-k 40\n  --no-repeat N  не повторять дословно куски из N байт (напр. 24; 0 = выкл)   --loop-n N [--loop-k K]  защита от петель: если последние N байт (напр. 24) уже встречались K раз (по умолчанию 2), запретить их дальнейшее повторение; 0 = выкл   --verify  сверить быстрый инференс с кодом обучения   --slow  медленный путь (окно целиком)"
     );
 }
 
@@ -707,5 +742,34 @@ fn main() {
     if let Err(e) = r {
         eprintln!("❌ {}", e);
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod loop_tests {
+    use super::*;
+    #[test]
+    fn guard_triggers_only_after_k_repeats() {
+        let unit = b"let x = 5;\n";
+        // 1 копия + начало второй: ключ встречался 1 раз -> при K=2 пока не вмешиваемся
+        let mut ctx = unit.to_vec();
+        ctx.extend_from_slice(&unit[..8]);
+        assert!(loop_banned(&ctx, 6, 2).is_none());
+        assert!(loop_banned(&ctx, 6, 1).is_some());
+        // 2 копии + начало третьей: запрещаем продолжение, как в прошлых копиях
+        let mut ctx = unit.to_vec();
+        ctx.extend_from_slice(unit);
+        ctx.extend_from_slice(&unit[..8]);
+        let b = loop_banned(&ctx, 6, 2).expect("петля должна быть замечена");
+        assert!(b[unit[8] as usize]);
+        assert_eq!(b.iter().filter(|&&x| x).count(), 1);
+        // выкл. и короткий контекст
+        assert!(loop_banned(&ctx, 0, 2).is_none());
+        assert!(loop_banned(b"abc", 6, 2).is_none());
+    }
+    #[test]
+    fn guard_ignores_unique_text() {
+        let ctx = b"fn main() { println!(\"hi\"); } // unique";
+        assert!(loop_banned(ctx, 8, 2).is_none());
     }
 }
