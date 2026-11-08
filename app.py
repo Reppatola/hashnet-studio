@@ -249,9 +249,8 @@ def read_ckpt_meta(path):
                 if n > 1 << 20:
                     raise ValueError
                 return f.read(n).decode("utf-8", "replace")
-            ver = u32()
+            u32()
             d, L, h, seq = u64(), u64(), u64(), u64()
-            ng = u64() if ver >= 2 else 0
             step = u64(); phase = u32(); rng = u64(); tokens = u64()
             done = f.read(1)[0]
             pstart = u64(); psteps = u64(); lr = struct.unpack("<f", f.read(4))[0]
@@ -263,10 +262,10 @@ def read_ckpt_meta(path):
                 p = rstr(); s0 = u64(); e0 = u64(); vs = u64(); ve = u64(); ph = u32()
                 w = struct.unpack("<d", f.read(8))[0]
                 segs.append({"path": p, "start": s0, "end": e0, "phase": ph, "weight": w})
-        params = 12 * L * d * d + 4 * L * d + 256 * d + seq * d + d * 256 + 2 * d + 2 * ng * d
+        params = 12 * L * d * d + 4 * L * d + 256 * d + seq * d + d * 256 + 2 * d
         return {"d_model": d, "layers": L, "heads": h, "seq": seq, "step": step, "phase": phase, "tokens": tokens,
                 "phase_done": bool(done), "phase_start": pstart, "phase_steps": psteps, "phase_lr": lr,
-                "params": params, "ngram": ng, "files": files, "segs": segs}
+                "params": params, "files": files, "segs": segs}
     except Exception:
         return None
 
@@ -373,17 +372,12 @@ def action_train(p):
     else:
         for k, flag in (("d_model", "--d-model"), ("layers", "--layers"), ("heads", "--heads"), ("seq", "--seq")):
             a += [flag, num(p, k, int, required=True, lo=1)]
-        ng = num(p, "hash_ngrams", int, 0, 0, 10**7)
-        if ng:
-            a += ["--hash-ngrams", ng]
-            if p.get("ngram_init") in ("zero", "normal"):
-                a += ["--ngram-init", p["ngram_init"]]
         if int(p["d_model"]) % int(p["heads"]):
             raise ValueError("d_model должно делиться на число голов")
     for k, flag, typ in (("batch", "--batch", int), ("accum", "--accum", int), ("lr", "--lr", float), ("warmup", "--warmup", int),
                          ("replay_frac", "--replay-frac", float), ("ckpt_every", "--ckpt-every", int), ("eval_every", "--eval-every", int),
                          ("keep", "--keep", int), ("seed", "--seed", int), ("log_every", "--log-every", int),
-                         ("val_windows", "--val-windows", int), ("ngram_lr_mult", "--ngram-lr-mult", float)):
+                         ("val_windows", "--val-windows", int)):
         v = num(p, k, typ)
         if v is not None:
             a += [flag, v]

@@ -41,10 +41,6 @@ pub struct Infer {
     kernels: HashMap<&'static str, CudaFunction>,
     emb: CudaSlice<f32>,
     posn: CudaSlice<f32>,
-    ngram: usize,
-    ng3: Option<CudaSlice<f32>>,
-    ng5: Option<CudaSlice<f32>>,
-    hist: Vec<u8>,
     wout: CudaSlice<f32>,
     lnfg: CudaSlice<f32>,
     lnfb: CudaSlice<f32>,
@@ -71,7 +67,7 @@ impl Infer {
         let ptx = compile_ptx(KERNELS)?;
         let module = gpu.ctx.load_module(ptx)?;
         let mut kernels = HashMap::new();
-        for n in ["embed_tok", "add_rows2", "ln_f", "q8", "gelu_f", "tmatvec", "matvec_f32", "attn_dec"] {
+        for n in ["embed_tok", "ln_f", "q8", "gelu_f", "tmatvec", "matvec_f32", "attn_dec"] {
             kernels.insert(n, module.load_function(n)?);
         }
         let mut zeros = 0u64;
@@ -123,10 +119,6 @@ impl Infer {
             kernels,
             emb: gpu.upload(&model.t[0])?,
             posn: gpu.upload(&model.t[1])?,
-            ngram: cfg.ngram,
-            ng3: if cfg.ngram > 0 { Some(gpu.upload(&model.t[cfg.ng_base()])?) } else { None },
-            ng5: if cfg.ngram > 0 { Some(gpu.upload(&model.t[cfg.ng_base() + 1])?) } else { None },
-            hist: Vec::new(),
             wout: gpu.upload(&model.t[2])?,
             lnfg: gpu.upload(&model.t[3])?,
             lnfb: gpu.upload(&model.t[4])?,
@@ -147,7 +139,6 @@ impl Infer {
     /// сбросить контекст (кэш перезаписывается по мере продвижения pos)
     pub fn reset(&mut self) {
         self.pos = 0;
-        self.hist.clear();
     }
 
     /// Подать один токен, вернуть логиты следующего байта.
@@ -155,7 +146,7 @@ impl Infer {
         if self.pos >= self.seq {
             return Err("инференс: контекст заполнен (нужен reset)".into());
         }
-        let Infer { d, dff, nh, dh, pos, stream, kernels, emb, posn, ngram, ng3, ng5, hist, wout, lnfg, lnfb, layers, x, h, qv, ctx, hid, hff, lg, qa, sc, .. } = self;
+        let Infer { d, dff, nh, dh, pos, stream, kernels, emb, posn, wout, lnfg, lnfb, layers, x, h, qv, ctx, hid, hff, lg, qa, sc, .. } = self;
         let (d, dff, nh, dh) = (*d as i32, *dff as i32, *nh, *dh as i32);
         let p = *pos as i32;
         let tok = token as i32;
@@ -167,13 +158,6 @@ impl Infer {
         let off = p * d;
 
         launch!(kernels, stream, "embed_tok", one(), &*emb, &*posn, &mut *x, &tok, &p, &d);
-        hist.push(token);
-        if let (Some(h3), Some(h5)) = (ng3.as_ref(), ng5.as_ref()) {
-            let pp = *pos;
-            let i3 = crate::model::ng_hash(hist, pp, 3, *ngram) as i32;
-            let i5 = crate::model::ng_hash(hist, pp, 5, *ngram) as i32;
-            launch!(kernels, stream, "add_rows2", one(), h3, h5, &mut *x, &i3, &i5, &d);
-        }
         for ly in layers.iter_mut() {
             let Layer { w, gam, ln1g, ln1b, ln2g, ln2b, kc, vc } = ly;
             launch!(kernels, stream, "ln_f", one(), &*x, &*ln1g, &*ln1b, &mut *h, &d);

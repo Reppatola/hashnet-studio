@@ -28,12 +28,6 @@ extern "C" __global__ void embed_tok(const float* emb, const float* pos_emb, flo
     for (int j = threadIdx.x; j < d; j += blockDim.x) x[j] = emb[tok * d + j] + pos_emb[pos * d + j];
 }
 
-// добавить строки хэш-таблиц n-грамм (индексы корзин считает хост той же ng_hash)
-extern "C" __global__ void add_rows2(const float* h3, const float* h5, float* x, int i3, int i5, int d)
-{
-    for (int j = threadIdx.x; j < d; j += blockDim.x) x[j] += h3[(long long)i3 * d + j] + h5[(long long)i5 * d + j];
-}
-
 // LayerNorm одного вектора (1 блок)
 extern "C" __global__ void ln_f(const float* x, const float* g, const float* b, float* out, int d)
 {

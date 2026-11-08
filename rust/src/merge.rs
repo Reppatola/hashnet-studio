@@ -198,9 +198,6 @@ fn combine(o: &Opts, base: Option<&Model>, ms: &[&Model]) -> Res<Model> {
 }
 
 fn stack(o: &Opts, ms: &[&Model]) -> Res<Model> {
-    if ms.iter().any(|m| m.cfg.ngram > 0) {
-        return Err("stack: модели с --hash-ngrams пока не поддерживаются".into());
-    }
     let c0 = &ms[0].cfg;
     for m in ms {
         if m.cfg.d_model != c0.d_model || m.cfg.n_heads != c0.n_heads || m.cfg.seq_len != c0.seq_len {
@@ -216,7 +213,7 @@ fn stack(o: &Opts, ms: &[&Model]) -> Res<Model> {
         spans.push((s, e));
     }
     let total: usize = spans.iter().map(|(s, e)| e - s).sum();
-    let cfg = Config { d_model: c0.d_model, n_layers: total, n_heads: c0.n_heads, seq_len: c0.seq_len, ngram: 0 };
+    let cfg = Config { d_model: c0.d_model, n_layers: total, n_heads: c0.n_heads, seq_len: c0.seq_len };
     let mut t: Vec<Vec<f32>> = Vec::with_capacity(cfg.n_tensors());
     for i in 0..BASE {
         let v = match o.globals.as_str() {
@@ -246,9 +243,6 @@ fn stack(o: &Opts, ms: &[&Model]) -> Res<Model> {
 ///        остаточные связи делают новую модель функционально равной старой, пока слои не обучились;
 ///        `copy` — новые слои = копии соседних старых (как в stack/SOLAR/Gstack).
 fn grow(o: &Opts, m: &Model) -> Res<Model> {
-    if m.cfg.ngram > 0 {
-        return Err("grow: модели с --hash-ngrams пока не поддерживаются".into());
-    }
     let k = o.add_layers;
     if k == 0 {
         return Err("для grow нужен --add-layers N (N>0)".into());
@@ -284,7 +278,7 @@ fn grow(o: &Opts, m: &Model) -> Res<Model> {
         }
     }
     debug_assert_eq!(plan.len(), l0 + k);
-    let cfg = Config { d_model: m.cfg.d_model, n_layers: l0 + k, n_heads: m.cfg.n_heads, seq_len: m.cfg.seq_len, ngram: 0 };
+    let cfg = Config { d_model: m.cfg.d_model, n_layers: l0 + k, n_heads: m.cfg.n_heads, seq_len: m.cfg.seq_len };
     let fresh = Model::new(cfg.clone(), o.seed);
     let mut t: Vec<Vec<f32>> = Vec::with_capacity(cfg.n_tensors());
     for i in 0..BASE {
@@ -458,7 +452,7 @@ mod tests {
 
     #[test]
     fn stack_layout_matches_config() {
-        let cfg = Config { d_model: 16, n_layers: 2, n_heads: 2, seq_len: 8, ngram: 0 };
+        let cfg = Config { d_model: 16, n_layers: 2, n_heads: 2, seq_len: 8 };
         let a = Model::new(cfg.clone(), 1);
         let b = Model::new(cfg.clone(), 2);
         let o = stack(&opts("stack"), &[&a, &b]).unwrap();
@@ -483,52 +477,21 @@ mod tests {
 
     #[test]
     fn combine_avg_of_identical_is_identity_and_checks_cfg() {
-        let cfg = Config { d_model: 16, n_layers: 2, n_heads: 2, seq_len: 8, ngram: 0 };
+        let cfg = Config { d_model: 16, n_layers: 2, n_heads: 2, seq_len: 8 };
         let a = Model::new(cfg.clone(), 1);
         let o = combine(&opts("avg"), None, &[&a, &a]).unwrap();
         for i in 0..a.t.len() { for k in 0..a.t[i].len() { assert!((o.t[i][k] - a.t[i][k]).abs() < 1e-6); } }
-        let c2 = Config { d_model: 16, n_layers: 3, n_heads: 2, seq_len: 8, ngram: 0 };
+        let c2 = Config { d_model: 16, n_layers: 3, n_heads: 2, seq_len: 8 };
         let b = Model::new(c2, 2);
         assert!(combine(&opts("avg"), None, &[&a, &b]).is_err());
         assert!(combine(&opts("ties"), None, &[&a, &a]).is_err()); // нет base
     }
 
     #[test]
-    fn ngram_ckpt_roundtrip_avg_and_stack_rejected() {
-        let dir = std::env::temp_dir().join(format!("hn_ng_test_{}", std::process::id()));
-        let d = |n: &str| dir.join(n).to_string_lossy().to_string();
-        let cfg = Config { d_model: 16, n_layers: 2, n_heads: 2, seq_len: 8, ngram: 32 };
-        let mk = |seed: u64| -> (Meta, Model) {
-            let m = Model::new(cfg.clone(), seed);
-            (Meta { cfg: cfg.clone(), step: 5, phase: 1, rng: 7, tokens: 1, phase_done: false, phase_start: 0, phase_steps: 10, phase_lr: 1e-3, files: vec![], segs: vec![] }, m)
-        };
-        let (ma, a) = mk(1);
-        let (mb, b) = mk(2);
-        ckpt::save(&d("a"), &ma, &a, &Adam::new(&a), 3).unwrap();
-        ckpt::save(&d("b"), &mb, &b, &Adam::new(&b), 3).unwrap();
-        let (meta, m, _) = ckpt::load(&ckpt::find_latest(&d("a")).unwrap()).unwrap();
-        assert_eq!(meta.cfg.ngram, 32);
-        assert_eq!(m.t.len(), cfg.n_tensors());
-        assert_eq!(m.t[cfg.ng_base() + 1], a.t[cfg.ng_base() + 1]);
-        let mut o = opts("avg");
-        o.models = vec![d("a"), d("b")];
-        o.out = d("av");
-        run(&o).unwrap();
-        let (_m2, av, _) = ckpt::load(&ckpt::find_latest(&d("av")).unwrap()).unwrap();
-        let i = cfg.ng_base();
-        assert!((av.t[i][3] - 0.5 * (a.t[i][3] + b.t[i][3])).abs() < 1e-6);
-        let mut os = opts("stack");
-        os.models = vec![d("a"), d("b")];
-        os.out = d("st");
-        assert!(run(&os).is_err());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
     fn end_to_end_ckpt_roundtrip() {
         let dir = std::env::temp_dir().join(format!("hn_merge_test_{}", std::process::id()));
         let d = |n: &str| dir.join(n).to_string_lossy().to_string();
-        let cfg = Config { d_model: 16, n_layers: 2, n_heads: 2, seq_len: 8, ngram: 0 };
+        let cfg = Config { d_model: 16, n_layers: 2, n_heads: 2, seq_len: 8 };
         let mk = |seed: u64, step: u64| -> (Meta, Model) {
             let m = Model::new(cfg.clone(), seed);
             (Meta { cfg: cfg.clone(), step, phase: 1, rng: 7, tokens: 100, phase_done: false, phase_start: 0, phase_steps: 10, phase_lr: 1e-3, files: vec![], segs: vec![] }, m)
@@ -559,7 +522,7 @@ mod tests {
     }
 
     fn small(l: usize, seed: u64) -> Model {
-        Model::new(Config { d_model: 16, n_layers: l, n_heads: 2, seq_len: 8, ngram: 0 }, seed)
+        Model::new(Config { d_model: 16, n_layers: l, n_heads: 2, seq_len: 8 }, seed)
     }
     fn gopts(k: usize, place: &str, init: &str) -> Opts {
         let mut o = opts("grow");
