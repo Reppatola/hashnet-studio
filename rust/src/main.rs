@@ -569,6 +569,43 @@ fn generate_fast(inf: &mut infer::Infer, prompt: &[u8], len: usize, temp: f32, t
     Ok(out)
 }
 
+/// Выгрузка NLL каждой позиции val-окон (для сравнения/смешивания с внешними моделями, tools/mix_ngram.py).
+/// Формат: "NLLD", u32 n, u32 t, n*(t+1) байт окон, n*t значений f32 (нат).
+fn cmd_dumpnll(a: &Args) -> Res<()> {
+    let p = ckpt::find_latest(&a.s("ckpt", "ckpt"))?;
+    let out_path = a.s("out", "nll_dump.bin");
+    let nwin: usize = a.get("val-windows", 1024usize)?;
+    let (meta, model, adam) = ckpt::load(&p)?;
+    let gpu = gpu::GpuBitwise::new()?;
+    let seq = model.cfg.seq_len;
+    let mut wins: Vec<Vec<u8>> = Vec::new();
+    for s in &meta.segs {
+        wins.extend(data::val_windows(s, seq + 1, nwin)?);
+    }
+    if wins.is_empty() {
+        return Err("в чекпойнте нет отложенной части (val)".into());
+    }
+    let mut tr = Trainer::new(&gpu, &model, &adam, 8, true)?;
+    let nll = tr.nll_per_token(&gpu, &wins)?;
+    let mean = nll.iter().map(|&x| x as f64).sum::<f64>() / nll.len() as f64;
+    println!("(чекпойнт {}, шаг {})", p.display(), meta.step);
+    println!("окон {}, позиций {}, val {:.4} нат = {:.3} бит/байт", wins.len(), nll.len(), mean, bpb(mean));
+    let mut f = std::io::BufWriter::new(std::fs::File::create(&out_path)?);
+    use std::io::Write;
+    f.write_all(b"NLLD")?;
+    f.write_all(&(wins.len() as u32).to_le_bytes())?;
+    f.write_all(&(seq as u32).to_le_bytes())?;
+    for w in &wins {
+        f.write_all(w)?;
+    }
+    for x in &nll {
+        f.write_all(&x.to_le_bytes())?;
+    }
+    f.flush()?;
+    println!("записано: {}", out_path);
+    Ok(())
+}
+
 fn cmd_gen(a: &Args) -> Res<()> {
     let p = ckpt::find_latest(&a.s("ckpt", "ckpt"))?;
     let (meta, model, adam) = ckpt::load(&p)?;
@@ -731,6 +768,7 @@ fn main() {
     let r = match a.cmd.as_str() {
         "train" => cmd_train(&a),
         "gen" => cmd_gen(&a),
+        "dumpnll" => cmd_dumpnll(&a),
         "info" => cmd_info(&a),
         "check" => cmd_check(&a),
         "merge" => cmd_merge(&a),

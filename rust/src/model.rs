@@ -562,6 +562,32 @@ impl Trainer {
         Ok(gpu.download(&self.nll)?[0] as f64 / cnt.max(1) as f64)
     }
 
+    /// NLL (нат) каждой позиции каждого окна длиной seq_len+1: результат n*seq_len чисел подряд.
+    pub fn nll_per_token(&mut self, gpu: &GpuBitwise, wins: &[Vec<u8>]) -> Res<Vec<f32>> {
+        let t = self.cfg.seq_len;
+        self.quantize(gpu)?;
+        let mut out = Vec::with_capacity(wins.len() * t);
+        for chunk in wins.chunks(self.cap_b) {
+            let b = chunk.len();
+            let mut toks = Vec::with_capacity(b * t);
+            let mut tg = Vec::with_capacity(b * t);
+            for w in chunk {
+                toks.extend_from_slice(&w[..t]);
+                tg.extend_from_slice(&w[1..t + 1]);
+            }
+            self.set_batch(gpu, &toks, &tg, b, t)?;
+            self.forward(gpu, b, t)?;
+            let lg = gpu.download(&self.logits)?;
+            for r in 0..b * t {
+                let row = &lg[r * VOCAB..(r + 1) * VOCAB];
+                let mx = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                let z: f64 = row.iter().map(|&x| ((x - mx) as f64).exp()).sum();
+                out.push((z.ln() - (row[tg[r] as usize] - mx) as f64) as f32);
+            }
+        }
+        Ok(out)
+    }
+
     /// логиты последней позиции окна (b=1). Перед генерацией один раз вызвать `quantize`.
     pub fn logits_last(&mut self, gpu: &GpuBitwise, window: &[u8]) -> Res<Vec<f32>> {
         let t = window.len();
